@@ -2,20 +2,26 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Matehia",
-  description: "Unified inbox pour dirigeants",
+  title: "luxee",
+  description: "Centralisez tous vos canaux de discussion en un seul endroit.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
-    title: "Matehia",
+    statusBarStyle: "black-translucent",
+    title: "luxee",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f0f0f",
+  themeColor: "#090909",
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -25,9 +31,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="fr" className="h-full">
-      <body className="h-full bg-[#0f0f0f] text-white antialiased">
-        {children}
-      </body>
+      <body className="h-full">{children}</body>
     </html>
   );
 }

@@ -1,11 +1,11 @@
 {
-  "name": "Matehia",
-  "short_name": "Matehia",
-  "description": "Unified inbox pour dirigeants",
+  "name": "luxee",
+  "short_name": "luxee",
+  "description": "Centralisez tous vos canaux de discussion.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f0f0f",
-  "theme_color": "#0f0f0f",
+  "background_color": "#090909",
+  "theme_color": "#090909",
   "orientation": "portrait",
   "icons": [
     {

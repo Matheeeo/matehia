@@ -1,9 +1,34 @@
 @import "tailwindcss";
 
+:root {
+  --accent: #8b5cf6;
+  --accent-dim: rgba(139, 92, 246, 0.15);
+  --accent-border: rgba(139, 92, 246, 0.35);
+  --bg: #090909;
+  --surface: #111111;
+  --surface-2: #1a1a1a;
+  --border: rgba(255, 255, 255, 0.07);
+  --text: #ffffff;
+  --text-muted: #666666;
+  --text-subtle: #444444;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
 body {
-  background: #0f0f0f;
-  color: #ffffff;
-  font-family: var(--font-geist-sans), Arial, sans-serif;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -12,4 +37,61 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Luxee logotype */
+.luxee-wordmark {
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: -0.04em;
+  color: var(--text);
+}
+
+/* Swipe card transition */
+.swipe-card {
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* Bottom sheet animation */
+.sheet-enter {
+  animation: sheetUp 0.28s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Fade overlay */
+.fade-in {
+  animation: fadeIn 0.2s ease forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Priority dot pulse */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.pulse {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
