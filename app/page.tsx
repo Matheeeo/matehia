@@ -121,6 +121,7 @@ export default function Home() {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<'idle' | 'ok' | 'err'>('idle');
+  const [sendError, setSendError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   // IDs marqués lus localement — prime sur les données serveur
   const localRead = useRef<Set<string>>(new Set());
@@ -157,6 +158,7 @@ export default function Home() {
     setSelected(msg);
     setReply('');
     setSendStatus('idle');
+    setSendError('');
     setTimeout(() => inputRef.current?.focus(), 350);
     if (!msg.read) {
       localRead.current.add(msg.id);
@@ -216,9 +218,11 @@ export default function Home() {
         setTimeout(() => { setSelected(null); setSendStatus('idle'); fetchMessages(filter, true); }, 900);
       } else {
         setSendStatus('err');
+        setSendError(data.detail || data.error || 'Erreur inconnue');
       }
-    } catch {
+    } catch (e) {
       setSendStatus('err');
+      setSendError(String(e));
     } finally {
       setSending(false);
     }
@@ -394,7 +398,7 @@ export default function Home() {
                     <input
                       ref={inputRef}
                       value={reply}
-                      onChange={e => { setReply(e.target.value); setSendStatus('idle'); }}
+                      onChange={e => { setReply(e.target.value); setSendStatus('idle'); setSendError(''); }}
                       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                       placeholder="Message..."
                       className="w-full px-4 py-3.5 text-[15px] bg-transparent outline-none"
@@ -421,7 +425,7 @@ export default function Home() {
                   </button>
                 </div>
                 {sendStatus === 'err' && (
-                  <p className="text-xs text-red-400 mt-2.5 px-1">Echec — verifie ta connexion</p>
+                  <p className="text-xs text-red-400 mt-2.5 px-1 break-all">{sendError || 'Echec envoi'}</p>
                 )}
                 {sendStatus === 'ok' && (
                   <p className="text-xs mt-2.5 px-1" style={{ color: '#34d399' }}>Envoye</p>
