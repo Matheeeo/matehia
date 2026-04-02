@@ -88,11 +88,11 @@ function MessageCard({ message, onClick, onArchive, onUrgent }: {
         className="relative w-full text-left rounded-2xl px-4 py-3.5"
       >
         <div className="flex items-start gap-3">
-          {!message.read && (
-            <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0"
-              style={{ background: urgent ? '#ef4444' : '#7c3aed', boxShadow: `0 0 6px ${urgent ? '#ef444488' : '#7c3aed88'}` }} />
-          )}
-          {message.read && <span className="mt-1.5 w-2 h-2 flex-shrink-0" />}
+          <span className="mt-2 w-2 h-2 rounded-full flex-shrink-0"
+            style={!message.read
+              ? { background: urgent ? '#ef4444' : '#7c3aed', boxShadow: `0 0 6px ${urgent ? '#ef444488' : '#7c3aed88'}` }
+              : { background: 'transparent' }
+            } />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-1">
               <SourcePill source={message.source} />
@@ -122,14 +122,26 @@ export default function Home() {
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<'idle' | 'ok' | 'err'>('idle');
   const inputRef = useRef<HTMLInputElement>(null);
+  // IDs marqués lus localement — prime sur les données serveur
+  const localRead = useRef<Set<string>>(new Set());
+  // IDs archivés localement
+  const localArchived = useRef<Set<string>>(new Set());
 
   const fetchMessages = useCallback(async (source: string, silent = false) => {
     if (!silent) setLoading(true);
     try {
       const url = source === 'Tous' ? '/api/messages' : `/api/messages?source=${encodeURIComponent(source)}`;
       const res = await fetch(url);
-      const data = await res.json();
-      setMessages(Array.isArray(data) ? data : []);
+      const data: Message[] = await res.json();
+      if (!Array.isArray(data)) return;
+      // Appliquer les overrides locaux
+      const merged = data
+        .filter(m => !localArchived.current.has(m.id))
+        .map(m => ({
+          ...m,
+          read: localRead.current.has(m.id) ? true : m.read,
+        }));
+      setMessages(merged);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -147,37 +159,43 @@ export default function Home() {
     setSendStatus('idle');
     setTimeout(() => inputRef.current?.focus(), 350);
     if (!msg.read) {
+      localRead.current.add(msg.id);
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, read: true } : m));
       fetch('/api/messages', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: msg.id, action: 'read' }),
       });
-      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, read: true } : m));
     }
   }
 
   async function handleArchive(id: string) {
-    await fetch('/api/messages', {
+    localArchived.current.add(id);
+    setMessages(prev => prev.filter(m => m.id !== id));
+    if (selected?.id === id) setSelected(null);
+    fetch('/api/messages', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, action: 'archive' }),
     });
-    setMessages(prev => prev.filter(m => m.id !== id));
-    if (selected?.id === id) setSelected(null);
   }
 
   async function handleUrgent(id: string) {
-    await fetch('/api/messages', {
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, priority: 'haute', read: false } : m));
+    if (selected?.id === id) setSelected(s => s ? { ...s, priority: 'haute' } : null);
+    fetch('/api/messages', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, action: 'urgent' }),
     });
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, priority: 'haute', read: false } : m));
-    if (selected?.id === id) setSelected(s => s ? { ...s, priority: 'haute' } : null);
   }
 
   async function handleSend() {
     if (!selected || !reply.trim() || sending) return;
+    if (!selected.conversation_id || !selected.id_destinataire) {
+      setSendStatus('err');
+      return;
+    }
     setSending(true);
     setSendStatus('idle');
     try {
@@ -232,28 +250,19 @@ export default function Home() {
       <div className="flex flex-col min-h-dvh max-w-lg mx-auto"
         style={{ fontFamily: '-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif' }}>
 
-        {/* Header */}
         <header className="px-5 pt-14 pb-4">
           <div className="flex items-end justify-between mb-5">
             <div>
-              <p className="text-xs font-semibold tracking-[0.15em] uppercase mb-1.5" style={{ color: '#7c3aed' }}>
-                Matehia
-              </p>
+              <p className="text-xs font-semibold tracking-[0.15em] uppercase mb-1.5" style={{ color: '#7c3aed' }}>Matehia</p>
               <h1 className="text-[32px] font-bold tracking-tight leading-none text-white">Inbox</h1>
             </div>
-            <div className="flex items-center gap-2 pb-1">
-              {unread > 0 && (
-                <>
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#7c3aed', boxShadow: '0 0 8px #7c3aed' }} />
-                  <span className="text-sm font-medium" style={{ color: '#9f7aea' }}>
-                    {unread} non lu{unread > 1 ? 's' : ''}
-                  </span>
-                </>
-              )}
-            </div>
+            {unread > 0 && (
+              <div className="flex items-center gap-2 pb-1">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#7c3aed', boxShadow: '0 0 8px #7c3aed' }} />
+                <span className="text-sm font-medium" style={{ color: '#9f7aea' }}>{unread} non lu{unread > 1 ? 's' : ''}</span>
+              </div>
+            )}
           </div>
-
-          {/* Filters */}
           <div className="flex gap-2 overflow-x-auto no-sb pb-0.5">
             {SOURCES.map(s => {
               const count = s === 'Tous' ? unread : (bySource[s] ?? 0);
@@ -264,16 +273,13 @@ export default function Home() {
                     ? { background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff', boxShadow: '0 0 18px rgba(124,58,237,0.35)' }
                     : { background: '#1c1c1e', color: '#636366' }
                   }
-                  className="shrink-0 flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full transition-all duration-150"
-                >
+                  className="shrink-0 flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full transition-all duration-150">
                   {s}
                   {count > 0 && (
                     <span style={active
                       ? { background: 'rgba(255,255,255,0.22)', color: '#fff' }
                       : { background: '#2c2c2e', color: '#a78bfa' }
-                    } className="text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                      {count}
-                    </span>
+                    } className="text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{count}</span>
                   )}
                 </button>
               );
@@ -281,11 +287,10 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Content */}
         <main className="flex-1 overflow-y-auto px-5 pb-10 no-sb space-y-7">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-52 gap-3">
-              <div className="w-7 h-7 rounded-full border-2 border-t-violet-500 spin" style={{ borderColor: 'rgba(124,58,237,0.2)', borderTopColor: '#7c3aed' }} />
+              <div className="w-7 h-7 rounded-full border-2 spin" style={{ borderColor: 'rgba(124,58,237,0.2)', borderTopColor: '#7c3aed' }} />
               <p className="text-xs text-zinc-700 tracking-wide">Chargement</p>
             </div>
           ) : messages.length === 0 ? (
@@ -302,9 +307,7 @@ export default function Home() {
             <>
               {urgent.length > 0 && (
                 <section>
-                  <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-red-500 mb-3 px-1">
-                    Urgent
-                  </p>
+                  <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-red-500 mb-3 px-1">Urgent</p>
                   <div className="space-y-1.5">
                     {urgent.map(m => <MessageCard key={m.id} message={m} onClick={handleClick} onArchive={handleArchive} onUrgent={handleUrgent} />)}
                   </div>
@@ -312,9 +315,7 @@ export default function Home() {
               )}
               {toProcess.length > 0 && (
                 <section>
-                  <p className="text-[10px] font-bold tracking-[0.18em] uppercase mb-3 px-1" style={{ color: '#7c3aed' }}>
-                    A traiter
-                  </p>
+                  <p className="text-[10px] font-bold tracking-[0.18em] uppercase mb-3 px-1" style={{ color: '#7c3aed' }}>A traiter</p>
                   <div className="space-y-1.5">
                     {toProcess.map(m => <MessageCard key={m.id} message={m} onClick={handleClick} onArchive={handleArchive} onUrgent={handleUrgent} />)}
                   </div>
@@ -333,23 +334,17 @@ export default function Home() {
         </main>
       </div>
 
-      {/* Sheet */}
       {selected && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="overlay absolute inset-0"
             style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}
             onClick={() => { setSelected(null); setReply(''); setSendStatus('idle'); }} />
-
           <div className="sheet relative w-full max-w-lg mx-auto rounded-t-3xl"
             style={{ background: '#161618', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-9 h-1 rounded-full" style={{ background: '#3a3a3c' }} />
             </div>
-
             <div className="px-5 pt-2 pb-10 space-y-5">
-
-              {/* Info */}
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-2">
@@ -371,12 +366,10 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Content */}
               <div className="rounded-2xl px-4 py-3.5" style={{ background: '#1c1c1e' }}>
                 <p className="text-[15px] leading-relaxed" style={{ color: '#e5e5ea' }}>{selected.content}</p>
               </div>
 
-              {/* Quick actions */}
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => handleUrgent(selected.id)}
                   className="py-3 rounded-2xl text-sm font-semibold"
@@ -390,15 +383,13 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Divider */}
               <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)' }} />
 
-              {/* Reply */}
               <div>
                 <p className="text-[10px] font-bold tracking-[0.15em] uppercase mb-3" style={{ color: '#48484a' }}>
                   Repondre via {selected.source}
                 </p>
-                <div className="flex gap-2.5 items-end">
+                <div className="flex gap-2.5 items-center">
                   <div className="flex-1 rounded-2xl" style={{ background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.06)' }}>
                     <input
                       ref={inputRef}
