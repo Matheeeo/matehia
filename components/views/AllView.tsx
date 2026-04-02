@@ -1,6 +1,6 @@
 "use client";
 
-import type { Message, Priority } from "@/lib/types";
+import type { Message } from "@/lib/types";
 import MessageCard from "@/components/MessageCard";
 
 type Props = {
