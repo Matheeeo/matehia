@@ -86,4 +86,4 @@ function MessageCard({ message, onClick, onArchive, onUrgent }: {
 const SOURCES = ['Tous', 'WhatsApp', 'LinkedIn', 'Email', 'SMS', 'Autre'];
 const POLL_INTERVAL = 10000;
 
-export default func
+export default function
