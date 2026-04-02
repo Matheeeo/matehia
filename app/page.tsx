@@ -1,272 +1,198 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import MessageCard from "@/components/MessageCard";
-import { type Message, type Source } from "@/lib/notion";
+import { useState, useCallback } from "react";
+import type { Message, Priority } from "@/lib/types";
+import { MOCK_MESSAGES } from "@/lib/mockData";
+import BottomNav, { type Tab } from "@/components/BottomNav";
+import MessageDetail from "@/components/MessageDetail";
+import AllView from "@/components/views/AllView";
+import ChannelsView from "@/components/views/ChannelsView";
+import PriorityView from "@/components/views/PriorityView";
+import PinnedView from "@/components/views/PinnedView";
 
-const SOURCES: (Source | "Tous")[] = [
-  "Tous",
-  "WhatsApp",
-  "LinkedIn",
-  "Email",
-  "SMS",
-  "Autre",
-];
-
-export default function InboxPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [activeSource, setActiveSource] = useState<Source | "Tous">("Tous");
-  const [loading, setLoading] = useState(true);
+export default function LuxeePage() {
+  const [messages, setMessages] = useState<Message[]>(MOCK_MESSAGES);
+  const [tab, setTab] = useState<Tab>("all");
   const [selected, setSelected] = useState<Message | null>(null);
 
-  const fetchMessages = useCallback(async (source: Source | "Tous") => {
-    setLoading(true);
-    const url =
-      source === "Tous"
-        ? "/api/messages"
-        : `/api/messages?source=${encodeURIComponent(source)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    setMessages(Array.isArray(data) ? data : []);
-    setLoading(false);
+  const handleOpen = useCallback((msg: Message) => {
+    setSelected(msg);
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msg.id ? { ...m, read: true } : m))
+    );
   }, []);
 
-  useEffect(() => {
-    fetchMessages(activeSource);
-  }, [activeSource, fetchMessages]);
+  const handleArchive = useCallback((id: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, archived: true, pinned: false } : m))
+    );
+    setSelected((s) => (s?.id === id ? null : s));
+  }, []);
 
-  async function handleOpen(msg: Message) {
-    setSelected(msg);
-    if (!msg.read) {
-      await fetch("/api/messages", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: msg.id, action: "read" }),
-      });
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msg.id ? { ...m, read: true } : m))
-      );
-    }
-  }
+  const handlePin = useCallback((id: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, pinned: !m.pinned } : m))
+    );
+    setSelected((s) =>
+      s?.id === id ? { ...s, pinned: !s.pinned } : s
+    );
+  }, []);
 
-  async function handleArchive(id: string) {
-    await fetch("/api/messages", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action: "archive" }),
-    });
-    setMessages((prev) => prev.filter((m) => m.id !== id));
-  }
+  const handleSetPriority = useCallback((id: string, priority: Priority) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, priority } : m))
+    );
+    setSelected((s) => (s?.id === id ? { ...s, priority } : s));
+  }, []);
 
-  async function handleUrgent(id: string) {
-    await fetch("/api/messages", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action: "urgent" }),
-    });
+  const handleReply = useCallback((id: string, text: string) => {
+    const newMsg = {
+      id: `${id}-reply-${Date.now()}`,
+      content: text,
+      date: new Date().toISOString(),
+      fromMe: true,
+    };
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === id ? { ...m, priority: "haute", read: false } : m
+        m.id === id
+          ? {
+              ...m,
+              thread: [...m.thread, newMsg],
+              preview: text,
+              date: new Date().toISOString(),
+              read: true,
+            }
+          : m
       )
     );
-  }
+    setSelected((s) =>
+      s?.id === id
+        ? {
+            ...s,
+            thread: [...s.thread, newMsg],
+            preview: text,
+            date: new Date().toISOString(),
+          }
+        : s
+    );
+  }, []);
 
-  // Split messages into sections
-  const urgent = messages.filter((m) => !m.read && m.priority === "haute");
-  const toHandle = messages.filter(
-    (m) => !m.read && m.priority !== "haute"
-  );
-  const done = messages.filter((m) => m.read);
+  const active = messages.filter((m) => !m.archived);
+  const unreadCount = active.filter((m) => !m.read).length;
+  const pinnedCount = active.filter((m) => m.pinned).length;
 
-  // Count per source for filter badges
-  const countBySource = messages.reduce<Record<string, number>>((acc, m) => {
-    acc[m.source] = (acc[m.source] ?? 0) + (!m.read ? 1 : 0);
-    return acc;
-  }, {});
-  const totalUnread = messages.filter((m) => !m.read).length;
+  const VIEW_TITLES: Record<Tab, string> = {
+    all: "Tout",
+    channels: "Canaux",
+    priority: "Priorité",
+    pinned: "Épinglés",
+  };
 
   return (
-    <div className="flex flex-col h-full max-w-lg mx-auto">
+    <div
+      className="flex flex-col h-full max-w-lg mx-auto"
+      style={{ background: "var(--bg)" }}
+    >
       {/* Header */}
-      <header className="px-4 pt-10 pb-4">
-        <div className="flex items-baseline justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
-          {totalUnread > 0 && (
-            <span className="text-sm text-zinc-400">
-              {totalUnread} non lu{totalUnread > 1 ? "s" : ""}
-            </span>
-          )}
+      <header
+        className="shrink-0 flex items-center justify-between px-5"
+        style={{
+          paddingTop: "max(env(safe-area-inset-top), 52px)",
+          paddingBottom: "16px",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
+        <div className="flex flex-col">
+          <span className="luxee-wordmark text-2xl">luxee</span>
+          <span className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+            {VIEW_TITLES[tab]}
+            {tab === "all" && unreadCount > 0 && (
+              <> · <span style={{ color: "var(--accent)" }}>{unreadCount} non lu{unreadCount > 1 ? "s" : ""}</span></>
+            )}
+          </span>
         </div>
 
-        {/* Source filters */}
-        <div className="flex gap-2 mt-4 overflow-x-auto pb-1 no-scrollbar">
-          {SOURCES.map((s) => {
-            const count =
-              s === "Tous" ? totalUnread : countBySource[s] ?? 0;
-            return (
-              <button
-                key={s}
-                onClick={() => setActiveSource(s)}
-                className={`shrink-0 flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${
-                  activeSource === s
-                    ? "bg-white text-black font-medium"
-                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-                }`}
-              >
-                {s}
-                {count > 0 && (
-                  <span
-                    className={`text-xs rounded-full w-4 h-4 flex items-center justify-center ${
-                      activeSource === s
-                        ? "bg-black/20 text-black"
-                        : "bg-zinc-600 text-zinc-300"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-3">
+          {/* Notification bell — decorative in V1 */}
+          <button
+            className="w-9 h-9 rounded-xl flex items-center justify-center relative"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            {unreadCount > 0 && (
+              <span
+                className="absolute top-1 right-1 w-2 h-2 rounded-full pulse"
+                style={{ background: "#f87171" }}
+              />
+            )}
+          </button>
+
+          {/* Avatar */}
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-semibold"
+            style={{ background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid var(--accent-border)" }}
+          >
+            D
+          </div>
         </div>
       </header>
 
-      {/* Message list */}
-      <main className="flex-1 overflow-y-auto px-4 pb-8 space-y-5">
-        {loading ? (
-          <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">
-            Chargement…
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">
-            Aucun message
-          </div>
-        ) : (
-          <>
-            {/* Urgent */}
-            {urgent.length > 0 && (
-              <section>
-                <p className="text-xs font-medium text-red-400 uppercase tracking-wider mb-2">
-                  Urgent
-                </p>
-                <div className="space-y-2">
-                  {urgent.map((msg) => (
-                    <MessageCard
-                      key={msg.id}
-                      message={msg}
-                      onClick={handleOpen}
-                      onArchive={handleArchive}
-                      onUrgent={handleUrgent}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* À traiter */}
-            {toHandle.length > 0 && (
-              <section>
-                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                  À traiter
-                </p>
-                <div className="space-y-2">
-                  {toHandle.map((msg) => (
-                    <MessageCard
-                      key={msg.id}
-                      message={msg}
-                      onClick={handleOpen}
-                      onArchive={handleArchive}
-                      onUrgent={handleUrgent}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Lu */}
-            {done.length > 0 && (
-              <section>
-                <p className="text-xs font-medium text-zinc-700 uppercase tracking-wider mb-2">
-                  Lu
-                </p>
-                <div className="space-y-2">
-                  {done.map((msg) => (
-                    <MessageCard
-                      key={msg.id}
-                      message={msg}
-                      onClick={handleOpen}
-                      onArchive={handleArchive}
-                      onUrgent={handleUrgent}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto no-scrollbar px-4 py-4">
+        {tab === "all" && (
+          <AllView
+            messages={messages}
+            onOpen={handleOpen}
+            onArchive={handleArchive}
+            onPin={handlePin}
+          />
+        )}
+        {tab === "channels" && (
+          <ChannelsView
+            messages={messages}
+            onOpen={handleOpen}
+            onArchive={handleArchive}
+            onPin={handlePin}
+          />
+        )}
+        {tab === "priority" && (
+          <PriorityView
+            messages={messages}
+            onOpen={handleOpen}
+            onArchive={handleArchive}
+            onPin={handlePin}
+          />
+        )}
+        {tab === "pinned" && (
+          <PinnedView
+            messages={messages}
+            onOpen={handleOpen}
+            onArchive={handleArchive}
+            onPin={handlePin}
+          />
         )}
       </main>
 
-      {/* Message detail — bottom sheet */}
+      {/* Bottom nav */}
+      <BottomNav
+        active={tab}
+        onChange={setTab}
+        counts={{ all: unreadCount, pinned: pinnedCount }}
+      />
+
+      {/* Message detail sheet */}
       {selected && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end z-50"
-          onClick={() => setSelected(null)}
-        >
-          <div
-            className="w-full max-w-lg mx-auto bg-zinc-900 rounded-t-2xl p-6 pb-10 space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-500 uppercase tracking-wider">
-                {selected.source}
-              </span>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-zinc-500 hover:text-white text-xl leading-none"
-              >
-                ×
-              </button>
-            </div>
-
-            <p className="font-semibold text-lg">{selected.sender}</p>
-
-            {selected.summary && (
-              <p className="text-sm text-white/80 bg-zinc-800 rounded-lg px-3 py-2 leading-relaxed">
-                {selected.summary}
-              </p>
-            )}
-
-            <p className="text-sm text-zinc-400 leading-relaxed">
-              {selected.content}
-            </p>
-
-            <p className="text-xs text-zinc-600">
-              {new Date(selected.date).toLocaleString("fr-FR")}
-            </p>
-
-            {/* Quick actions */}
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => {
-                  handleUrgent(selected.id);
-                  setSelected(null);
-                }}
-                className="flex-1 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm font-medium"
-              >
-                Urgent
-              </button>
-              <button
-                onClick={() => {
-                  handleArchive(selected.id);
-                  setSelected(null);
-                }}
-                className="flex-1 py-2 rounded-lg bg-zinc-800 text-zinc-400 text-sm font-medium"
-              >
-                Archiver
-              </button>
-            </div>
-          </div>
-        </div>
+        <MessageDetail
+          message={selected}
+          onClose={() => setSelected(null)}
+          onArchive={handleArchive}
+          onPin={handlePin}
+          onSetPriority={handleSetPriority}
+          onReply={handleReply}
+        />
       )}
     </div>
   );
