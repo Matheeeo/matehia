@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const SUPABASE_URL = process.env.SUPABASE_URL ?? 'https://zmimsvyxooweqefwlzyg.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InptaW1zdnl4b293ZXFlZndsenlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMzc0NTUsImV4cCI6MjA5MDcxMzQ1NX0.bgzxGe8stTToUYTPui-qN_jDMr7w08RRgmeNsY4KTSY';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zmimsvyxooweqefwlzyg.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InptaW1zdnl4b293ZXFlZndsenlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMzc0NTUsImV4cCI6MjA5MDcxMzQ1NX0.bgzxGe8stTToUYTPui-qN_jDMr7w08RRgmeNsY4KTSY';
 
 const sbHeaders = {
   apikey: SUPABASE_ANON_KEY,
@@ -26,21 +26,25 @@ export async function GET(request: NextRequest) {
       `${SUPABASE_URL}/rest/v1/inbox` +
       `?archive=eq.false` +
       `&order=date_dernier_message.desc` +
-      `&select=id,canal,expediteur_principal,date_dernier_message,lu,priorite,resume,dernier_message`;
+      `&select=id,canal,expediteur_principal,date_dernier_message,lu,priorite,resume,dernier_message,id_destinataire,conversation_id`;
 
     if (source && source !== 'Tous') {
       const canal = source === 'Email' ? 'Outlook' : source;
       url += `&canal=eq.${encodeURIComponent(canal)}`;
     }
 
+    console.log('[API] Fetching:', url);
+
     const res = await fetch(url, { headers: sbHeaders, cache: 'no-store' });
+
     if (!res.ok) {
       const err = await res.text();
-      console.error('Supabase GET error:', err);
-      throw new Error('Supabase error');
+      console.error('[API] Supabase GET error:', res.status, err);
+      throw new Error(`Supabase ${res.status}: ${err}`);
     }
 
     const rows = await res.json();
+    console.log('[API] Got rows:', rows.length);
 
     const messages = rows.map((c: Record<string, unknown>) => ({
       id: c.id,
@@ -51,11 +55,17 @@ export async function GET(request: NextRequest) {
       summary: c.resume || null,
       priority: mapPriority(c.priorite as string | null),
       read: c.lu,
+      id_destinataire: c.id_destinataire || '',
+      conversation_id: c.conversation_id || '',
     }));
 
     return NextResponse.json(messages);
-  } catch {
-    return NextResponse.json({ error: 'Erreur Supabase' }, { status: 500 });
+  } catch (err) {
+    console.error('[API] Caught error:', err);
+    return NextResponse.json(
+      { error: 'Erreur Supabase', detail: String(err) },
+      { status: 500 }
+    );
   }
 }
 
@@ -78,12 +88,16 @@ export async function PATCH(request: NextRequest) {
 
     if (!res.ok) {
       const err = await res.text();
-      console.error('Supabase PATCH error:', err);
-      throw new Error('Supabase error');
+      console.error('[API] Supabase PATCH error:', res.status, err);
+      throw new Error(`Supabase PATCH ${res.status}: ${err}`);
     }
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: 'Erreur Supabase' }, { status: 500 });
+  } catch (err) {
+    console.error('[API] PATCH caught error:', err);
+    return NextResponse.json(
+      { error: 'Erreur Supabase', detail: String(err) },
+      { status: 500 }
+    );
   }
 }
