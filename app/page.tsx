@@ -15,16 +15,25 @@ const CANAL_CFG: Record<string, { color: string; bg: string; border: string; gly
 };
 
 type Message = {
-  id: string;
+  id: string;         // conversations.id (UUID)
   source: string;
   date: string;
   sender: string;
-  content: string;
-  summary: string | null;
+  content: string;    // dernier_message complet
+  summary: string | null; // résumé IA court — affiché dans la card SEULEMENT
   priority: string | null;
   read: boolean;
   id_destinataire: string;
-  conversation_id: string;
+  conversation_id: string; // external_contact_id
+};
+
+type ThreadMsg = {
+  id: string;
+  body: string;
+  direction: 'inbound' | 'outbound';
+  sent_at: string;
+  source: string;
+  status: string;
 };
 
 function timeAgo(iso: string) {
@@ -36,13 +45,16 @@ function timeAgo(iso: string) {
   return days === 1 ? 'hier' : `${days}j`;
 }
 
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
 function Pill({ source, small }: { source: string; small?: boolean }) {
   const cfg = CANAL_CFG[source] ?? CANAL_CFG.Autre;
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
-      color: cfg.color, background: cfg.bg,
-      border: `1px solid ${cfg.border}`,
+      color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}`,
       fontSize: small ? 10 : 11, fontWeight: 600,
       padding: small ? '2px 7px' : '3px 9px',
       borderRadius: 99, letterSpacing: '0.02em',
@@ -71,7 +83,6 @@ function MessageCard({ message, onClick, onArchive, onUrgent }: {
         justifyContent: 'flex-start', paddingLeft: 20,
         background: 'rgba(239,68,68,0.06)',
         opacity: offset > 50 ? Math.min((offset - 50) / 60, 1) : 0,
-        transition: 'opacity 0.1s',
       }}>
         <span style={{ color: '#f87171', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Urgent</span>
       </div>
@@ -80,7 +91,6 @@ function MessageCard({ message, onClick, onArchive, onUrgent }: {
         justifyContent: 'flex-end', paddingRight: 20,
         background: 'rgba(255,255,255,0.03)',
         opacity: offset < -50 ? Math.min((-offset - 50) / 60, 1) : 0,
-        transition: 'opacity 0.1s',
       }}>
         <span style={{ color: '#52525b', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Archiver</span>
       </div>
@@ -133,12 +143,15 @@ function MessageCard({ message, onClick, onArchive, onUrgent }: {
           letterSpacing: '-0.01em',
         }}>{message.sender}</p>
 
+        {/* Card : résumé IA seulement (court, 1 ligne) */}
         <p style={{
           margin: 0, fontSize: 13,
           color: message.read ? '#3a3a3c' : '#71717a',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           lineHeight: 1.4,
-        }}>{message.summary || message.content}</p>
+        }}>
+          {message.summary || message.content}
+        </p>
       </div>
     </div>
   );
@@ -151,11 +164,14 @@ export default function Home() {
   const [filter, setFilter] = useState('Tous');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Message | null>(null);
+  const [thread, setThread] = useState<ThreadMsg[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<'idle' | 'ok' | 'err'>('idle');
   const [sendError, setSendError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const threadEndRef = useRef<HTMLDivElement>(null);
   const localRead = useRef<Set<string>>(new Set());
   const localArchived = useRef<Set<string>>(new Set());
 
@@ -181,12 +197,35 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [filter, fetchMessages]);
 
+  // Auto-scroll thread vers le bas quand il se charge
+  useEffect(() => {
+    if (thread.length > 0) {
+      setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
+  }, [thread]);
+
+  async function fetchThread(conversationUuid: string) {
+    setThreadLoading(true);
+    setThread([]);
+    try {
+      const res = await fetch(`/api/thread?conversation_uuid=${encodeURIComponent(conversationUuid)}`);
+      const data = await res.json();
+      if (Array.isArray(data)) setThread(data);
+    } catch {
+      setThread([]);
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
   async function handleClick(msg: Message) {
     setSelected(msg);
     setReply('');
     setSendStatus('idle');
     setSendError('');
-    setTimeout(() => inputRef.current?.focus(), 350);
+    // Charger le fil complet — msg.id = conversations.id (UUID)
+    fetchThread(msg.id);
+    setTimeout(() => inputRef.current?.focus(), 400);
     if (!msg.read) {
       localRead.current.add(msg.id);
       setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, read: true } : m));
@@ -243,8 +282,19 @@ export default function Home() {
       const data = await res.json();
       if (data.success) {
         setSendStatus('ok');
+        const sentMsg = reply.trim();
         setReply('');
-        setTimeout(() => { setSelected(null); setSendStatus('idle'); fetchMessages(filter, true); }, 900);
+        // Ajouter le message envoyé localement dans le fil
+        setThread(prev => [...prev, {
+          id: data.message_id || `local_${Date.now()}`,
+          body: sentMsg,
+          direction: 'outbound',
+          sent_at: new Date().toISOString(),
+          source: selected.source,
+          status: 'sent',
+        }]);
+        setTimeout(() => setSendStatus('idle'), 2000);
+        fetchMessages(filter, true);
       } else {
         setSendStatus('err');
         setSendError(data.detail || data.error || 'Erreur inconnue');
@@ -257,11 +307,11 @@ export default function Home() {
     }
   }
 
-  const urgent = messages.filter(m => !m.read && m.priority === 'haute');
+  const urgent    = messages.filter(m => !m.read && m.priority === 'haute');
   const toProcess = messages.filter(m => !m.read && m.priority !== 'haute');
-  const done = messages.filter(m => m.read);
-  const unread = urgent.length + toProcess.length;
-  const bySource = messages.reduce<Record<string, number>>((a, m) => {
+  const done      = messages.filter(m => m.read);
+  const unread    = urgent.length + toProcess.length;
+  const bySource  = messages.reduce<Record<string, number>>((a, m) => {
     if (!m.read) a[m.source] = (a[m.source] ?? 0) + 1;
     return a;
   }, {});
@@ -279,6 +329,7 @@ export default function Home() {
         @keyframes glow { 0%,100% { opacity:1; transform:scale(1) } 50% { opacity:0.5; transform:scale(0.8) } }
         .spin { animation: spin 0.8s linear infinite; }
         .glow-dot { animation: glow 2s ease-in-out infinite; }
+        .thread-scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
       `}</style>
 
       <div style={{
@@ -286,13 +337,12 @@ export default function Home() {
         fontFamily: '-apple-system, "SF Pro Display", "SF Pro Text", system-ui, sans-serif',
         position: 'relative', overflow: 'hidden',
       }}>
-        {/* Noise texture */}
+        {/* Noise */}
         <div style={{
           position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
           backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`,
           opacity: 0.018,
         }} />
-        {/* Ambient glow */}
         <div style={{
           position: 'fixed', top: -200, left: '50%', transform: 'translateX(-50%)',
           width: 600, height: 400,
@@ -306,28 +356,17 @@ export default function Home() {
           <div style={{ padding: '56px 20px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24 }}>
               <div>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#7c3aed', marginBottom: 6 }}>
-                  MATEHIA
-                </div>
-                <h1 style={{ fontSize: 34, fontWeight: 800, color: '#fafafa', margin: 0, letterSpacing: '-0.03em', lineHeight: 1 }}>
-                  Inbox
-                </h1>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#7c3aed', marginBottom: 6 }}>MATEHIA</div>
+                <h1 style={{ fontSize: 34, fontWeight: 800, color: '#fafafa', margin: 0, letterSpacing: '-0.03em', lineHeight: 1 }}>Inbox</h1>
               </div>
               {unread > 0 && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)',
-                  borderRadius: 99, padding: '6px 12px',
-                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 99, padding: '6px 12px' }}>
                   <span className="glow-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#7c3aed', boxShadow: '0 0 10px rgba(124,58,237,0.8)', display: 'block' }} />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>
-                    {unread} non lu{unread > 1 ? 's' : ''}
-                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>{unread} non lu{unread > 1 ? 's' : ''}</span>
                 </div>
               )}
             </div>
 
-            {/* Filters */}
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
               {SOURCES.map(s => {
                 const count = s === 'Tous' ? unread : (bySource[s] ?? 0);
@@ -410,11 +449,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Bottom Sheet */}
+      {/* Bottom Sheet — fil de conversation */}
       {selected && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end' }}>
           <div
-            onClick={() => { setSelected(null); setReply(''); setSendStatus('idle'); setSendError(''); }}
+            onClick={() => { setSelected(null); setReply(''); setSendStatus('idle'); setThread([]); }}
             style={{
               position: 'absolute', inset: 0,
               background: 'rgba(0,0,0,0.75)',
@@ -430,71 +469,114 @@ export default function Home() {
             borderRadius: '24px 24px 0 0',
             boxShadow: '0 -40px 80px rgba(0,0,0,0.8), 0 -1px 0 inset rgba(255,255,255,0.06)',
             animation: 'slideUp 0.38s cubic-bezier(0.22,1,0.36,1)',
+            maxHeight: '88dvh',
+            display: 'flex', flexDirection: 'column',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}>
+            {/* Handle */}
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px', flexShrink: 0 }}>
               <div style={{ width: 36, height: 4, background: '#27272a', borderRadius: 99 }} />
             </div>
 
-            <div style={{ padding: '8px 20px 40px' }}>
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+            {/* Header fixe */}
+            <div style={{ padding: '4px 20px 12px', flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <Pill source={selected.source} />
-                    <span style={{ fontSize: 12, color: '#3f3f46' }}>
+                    <span style={{ fontSize: 11, color: '#3f3f46' }}>
                       {new Date(selected.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
-                      {' · '}
-                      {new Date(selected.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#fafafa', letterSpacing: '-0.03em', lineHeight: 1.1 }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#fafafa', letterSpacing: '-0.02em' }}>
                     {selected.sender}
                   </div>
                 </div>
-                <button
-                  onClick={() => { setSelected(null); setReply(''); setSendStatus('idle'); setSendError(''); }}
-                  style={{
-                    width: 32, height: 32, borderRadius: '50%', border: 'none', cursor: 'pointer',
-                    background: 'rgba(255,255,255,0.06)', color: '#52525b',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14, flexShrink: 0, marginLeft: 12, fontFamily: 'inherit',
-                  }}>✕</button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 12 }}>
+                  <button
+                    onClick={() => handleUrgent(selected.id)}
+                    style={{
+                      padding: '7px 12px', borderRadius: 10,
+                      border: '1px solid rgba(239,68,68,0.15)', background: 'rgba(239,68,68,0.06)',
+                      color: '#f87171', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>Urgent</button>
+                  <button
+                    onClick={() => handleArchive(selected.id)}
+                    style={{
+                      padding: '7px 12px', borderRadius: 10,
+                      border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)',
+                      color: '#52525b', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>Archiver</button>
+                  <button
+                    onClick={() => { setSelected(null); setReply(''); setSendStatus('idle'); setThread([]); }}
+                    style={{
+                      width: 30, height: 30, borderRadius: '50%', border: 'none', cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.06)', color: '#52525b',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontFamily: 'inherit',
+                    }}>✕</button>
+                </div>
               </div>
+            </div>
 
-              {/* Message */}
-              <div style={{
-                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: 16, padding: '14px 16px', marginBottom: 16,
-              }}>
-                <p style={{ margin: 0, fontSize: 15, color: '#e4e4e7', lineHeight: 1.6 }}>
-                  {selected.content}
-                </p>
-              </div>
+            {/* Fil de conversation scrollable */}
+            <div className="thread-scroll" style={{ flex: 1, padding: '16px 16px 8px', overflowY: 'auto' }}>
+              {threadLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '24px 0' }}>
+                  <div className="spin" style={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid transparent', borderTopColor: '#7c3aed', borderRightColor: 'rgba(124,58,237,0.2)' }} />
+                </div>
+              ) : thread.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px 0', color: '#3f3f46', fontSize: 13 }}>
+                  Aucun message dans ce fil
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {thread.map((msg, i) => {
+                    const isOut = msg.direction === 'outbound';
+                    const prevMsg = thread[i - 1];
+                    const showTime = !prevMsg ||
+                      (new Date(msg.sent_at).getTime() - new Date(prevMsg.sent_at).getTime()) > 5 * 60 * 1000;
 
-              {/* Actions */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-                <button
-                  onClick={() => handleUrgent(selected.id)}
-                  style={{
-                    padding: 12, borderRadius: 14, border: '1px solid rgba(239,68,68,0.15)',
-                    background: 'rgba(239,68,68,0.06)', color: '#f87171',
-                    fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                  }}>Marquer urgent</button>
-                <button
-                  onClick={() => handleArchive(selected.id)}
-                  style={{
-                    padding: 12, borderRadius: 14, border: '1px solid rgba(255,255,255,0.06)',
-                    background: 'rgba(255,255,255,0.03)', color: '#52525b',
-                    fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                  }}>Archiver</button>
-              </div>
+                    return (
+                      <div key={msg.id}>
+                        {showTime && (
+                          <div style={{ textAlign: 'center', marginBottom: 8, marginTop: i > 0 ? 4 : 0 }}>
+                            <span style={{ fontSize: 11, color: '#3f3f46', fontWeight: 500 }}>
+                              {new Date(msg.sent_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                              {' · '}
+                              {formatTime(msg.sent_at)}
+                            </span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: isOut ? 'flex-end' : 'flex-start' }}>
+                          <div style={{
+                            maxWidth: '78%',
+                            background: isOut
+                              ? 'linear-gradient(135deg, #7c3aed, #5b21b6)'
+                              : 'rgba(255,255,255,0.06)',
+                            border: isOut ? 'none' : '1px solid rgba(255,255,255,0.06)',
+                            borderRadius: isOut
+                              ? '18px 18px 4px 18px'
+                              : '18px 18px 18px 4px',
+                            padding: '10px 14px',
+                            boxShadow: isOut ? '0 2px 12px rgba(124,58,237,0.3)' : 'none',
+                          }}>
+                            <p style={{
+                              margin: 0, fontSize: 14, lineHeight: 1.5,
+                              color: isOut ? '#fff' : '#e4e4e7',
+                              wordBreak: 'break-word',
+                            }}>{msg.body}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={threadEndRef} />
+                </div>
+              )}
+            </div>
 
-              <div style={{ height: 1, background: 'rgba(255,255,255,0.04)', marginBottom: 20 }} />
-
-              {/* Reply */}
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#3f3f46', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 12 }}>
-                Repondre via {selected.source}
-              </div>
+            {/* Zone de réponse fixe en bas */}
+            <div style={{ padding: '12px 16px 32px', flexShrink: 0, borderTop: '1px solid rgba(255,255,255,0.04)' }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <div style={{
                   flex: 1, borderRadius: 16,
@@ -507,9 +589,9 @@ export default function Home() {
                     value={reply}
                     onChange={e => { setReply(e.target.value); setSendStatus('idle'); setSendError(''); }}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                    placeholder="Message..."
+                    placeholder={`Repondre via ${selected.source}...`}
                     style={{
-                      width: '100%', padding: '14px 16px', fontSize: 15,
+                      width: '100%', padding: '13px 16px', fontSize: 15,
                       background: 'transparent', border: 'none', outline: 'none',
                       color: '#fafafa', fontFamily: 'inherit',
                     }}
@@ -543,12 +625,7 @@ export default function Home() {
                 </button>
               </div>
               {sendStatus === 'err' && (
-                <p style={{ fontSize: 12, color: '#f87171', marginTop: 10, paddingLeft: 4 }}>
-                  {sendError || 'Echec envoi'}
-                </p>
-              )}
-              {sendStatus === 'ok' && (
-                <p style={{ fontSize: 12, color: '#34d399', marginTop: 10, paddingLeft: 4 }}>Envoye</p>
+                <p style={{ fontSize: 12, color: '#f87171', marginTop: 8, paddingLeft: 4 }}>{sendError || 'Echec envoi'}</p>
               )}
             </div>
           </div>
