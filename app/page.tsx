@@ -224,12 +224,47 @@ export default function Home() {
   setSending(true)
   setSendError('')
 
-  // Seul Email fonctionne pour l'instant (pas de Twilio)
   if (selected.source !== 'Email') {
-    setSendError(`R\u00e9ponse via ${selected.source} non disponible pour l\u2019instant (Twilio non configur\u00e9)`)
+    setSendError(`R\u00e9ponse via ${selected.source} non disponible pour l\u2019instant`)
     setSending(false)
     return
   }
+
+  try {
+    const res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: selected.id,
+        canal: 'Email',
+        message: replyText,
+        subject: selected.summary || undefined,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (res.ok && data.success) {
+      setThread((prev) => [
+        ...prev,
+        {
+          id: data.message_id || `local-${Date.now()}`,
+          body: replyText,
+          direction: 'outbound' as const,
+          sent_at: new Date().toISOString(),
+        },
+      ])
+      setReplyText('')
+    } else {
+      setSendError(data.error || 'Envoi \u00e9chou\u00e9')
+    }
+  } catch (e) {
+    console.error(e)
+    setSendError('Erreur r\u00e9seau')
+  } finally {
+    setSending(false)
+  }
+}
 
   try {
     const res = await fetch('/api/messages', {
