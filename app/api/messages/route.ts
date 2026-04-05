@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 const HEADERS = {
   apikey: SUPABASE_ANON_KEY,
   Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
   'Content-Type': 'application/json',
+  Prefer: 'return=representation',
 }
 
 const CANAL_TO_SOURCE: Record<string, string> = {
@@ -21,44 +22,60 @@ const SOURCE_TO_CANAL: Record<string, string> = Object.fromEntries(
 )
 
 export async function GET(request: NextRequest) {
-  // Fix 500 : on parse l'URL avec une base fallback
+  if (!SUPABASE_URL) {
+    return NextResponse.json({ error: 'NEXT_PUBLIC_SUPABASE_URL not set' }, { status: 500 })
+  }
+
   const url = new URL(request.url, 'http://localhost')
   const archived = url.searchParams.get('archived') === 'true'
   const search = url.searchParams.get('search') || ''
   const source = url.searchParams.get('source') || ''
 
-  const params = new URLSearchParams()
-  params.set('archive', `eq.${archived}`)
-  params.set('order', 'date_dernier_message.desc')
-  params.set('select', '*')
+  // Construction manuelle de la query string sans URLSearchParams
+  // (évite l'encodage de * en %2A qui casse Supabase)
+  const parts: string[] = [
+    `archive=eq.${archived}`,
+    `order=date_dernier_message.desc`,
+    `select=*`,
+  ]
 
   if (source && SOURCE_TO_CANAL[source]) {
-    params.set('canal', `eq.${SOURCE_TO_CANAL[source]}`)
+    parts.push(`canal=eq.${SOURCE_TO_CANAL[source]}`)
   }
 
   if (search) {
-    const s = `*${search}*`
-    params.set(
-      'or',
-      `(expediteur_principal.ilike.${s},dernier_message.ilike.${s},resume.ilike.${s})`
-    )
+    parts.push(`or=(expediteur_principal.ilike.*${search}*,dernier_message.ilike.*${search}*,resume.ilike.*${search}*)`)
   }
 
+  const queryString = parts.join('&')
+
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/inbox?${params}`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/inbox?${queryString}`, {
       headers: HEADERS,
       cache: 'no-store',
     })
 
+    const raw = await res.text()
+
     if (!res.ok) {
-      const err = await res.text()
-      console.error('[route] Supabase error:', err)
-      return NextResponse.json({ error: err }, { status: res.status })
+      console.error('[route] Supabase error:', raw)
+      return NextResponse.json({ error: raw }, { status: res.status })
     }
 
-    const data = await res.json()
+    let data: any[]
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      console.error('[route] JSON parse error, raw:', raw)
+      return NextResponse.json({ error: 'Invalid JSON from Supabase' }, { status: 500 })
+    }
 
-    const mapped = (data as any[]).map((row) => ({
+    if (!Array.isArray(data)) {
+      console.error('[route] Expected array, got:', data)
+      return NextResponse.json({ error: 'Unexpected Supabase response', detail: data }, { status: 500 })
+    }
+
+    const mapped = data.map((row) => ({
       id: row.id,
       source: CANAL_TO_SOURCE[row.canal] || row.canal,
       sender: row.expediteur_principal,
@@ -74,7 +91,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(mapped)
   } catch (err) {
-    console.error('[route] Fetch error:', err)
+    console.error('[route] Fetch error:', String(err))
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
@@ -111,7 +128,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ success: true })
   } catch (err) {
-    console.error('[route] PATCH error:', err)
+    console.error('[route] PATCH error:', String(err))
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
