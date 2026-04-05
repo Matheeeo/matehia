@@ -9,18 +9,22 @@ const sbHeaders = {
   'Content-Type': 'application/json',
 };
 
-// Mapper source frontend → canal Supabase enum
+// canal Supabase (enum lowercase) → source frontend (affichée dans l'app)
+const CANAL_TO_SOURCE: Record<string, string> = {
+  outlook:  'Email',
+  sms:      'SMS',
+  whatsapp: 'WhatsApp',
+  linkedin: 'LinkedIn',
+  internal: 'Autre',
+};
+
+// source frontend → canal Supabase (pour le filtre GET)
 const SOURCE_TO_CANAL: Record<string, string> = {
   Email:    'outlook',
   SMS:      'sms',
   WhatsApp: 'whatsapp',
   LinkedIn: 'linkedin',
 };
-
-// Mapper canal Supabase → source frontend
-function mapCanal(canal: string): string {
-  return canal === 'outlook' ? 'Email' : canal.charAt(0).toUpperCase() + canal.slice(1);
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -47,16 +51,16 @@ export async function GET(request: NextRequest) {
     const rows = await res.json();
 
     const messages = rows.map((c: Record<string, unknown>) => ({
-      id:              c.id,                    // UUID conversation Supabase — utilisé pour charger le fil
-      source:          mapCanal(c.canal as string),
+      id:              c.id,                                                      // UUID conversation — pour fetchThread
+      source:          CANAL_TO_SOURCE[c.canal as string] ?? 'Autre',            // source frontend correcte
       date:            c.date_dernier_message,
       sender:          c.expediteur_principal,
-      content:         c.dernier_message || c.resume || '', // message entrant complet (bottom sheet)
-      summary:         c.resume || null,        // résumé IA (card uniquement)
+      content:         c.dernier_message || c.resume || '',                       // message ENTIER (bottom sheet)
+      summary:         c.resume || null,                                           // résumé IA (card uniquement)
       priority:        (c.priorite as string)?.includes('Haute') ? 'haute' : null,
       read:            c.lu,
       id_destinataire: c.id_destinataire || '',
-      conversation_id: c.conversation_id || '', // external_contact_id
+      conversation_id: c.conversation_id || '',
     }));
 
     return NextResponse.json(messages);
@@ -76,8 +80,7 @@ export async function PATCH(request: NextRequest) {
     else if (action === 'urgent')  update = { priority: 'high', is_read: false };
     else return NextResponse.json({ error: 'Action invalide' }, { status: 400 });
 
-    const url = `${SUPABASE_URL}/rest/v1/conversations?id=eq.${id}`;
-    const res = await fetch(url, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/conversations?id=eq.${id}`, {
       method: 'PATCH',
       headers: { ...sbHeaders, Prefer: 'return=minimal' },
       body: JSON.stringify(update),
