@@ -7,7 +7,6 @@ const HEADERS = {
   apikey: SUPABASE_ANON_KEY,
   Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
   'Content-Type': 'application/json',
-  Prefer: 'return=representation',
 }
 
 const CANAL_TO_SOURCE: Record<string, string> = {
@@ -31,8 +30,7 @@ export async function GET(request: NextRequest) {
   const search = url.searchParams.get('search') || ''
   const source = url.searchParams.get('source') || ''
 
-  // Construction manuelle de la query string sans URLSearchParams
-  // (évite l'encodage de * en %2A qui casse Supabase)
+  // Construction manuelle pour éviter l'encodage de * par URLSearchParams
   const parts: string[] = [
     `archive=eq.${archived}`,
     `order=date_dernier_message.desc`,
@@ -44,13 +42,13 @@ export async function GET(request: NextRequest) {
   }
 
   if (search) {
-    parts.push(`or=(expediteur_principal.ilike.*${search}*,dernier_message.ilike.*${search}*,resume.ilike.*${search}*)`)
+    parts.push(
+      `or=(expediteur_principal.ilike.*${search}*,dernier_message.ilike.*${search}*,resume.ilike.*${search}*)`
+    )
   }
 
-  const queryString = parts.join('&')
-
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/inbox?${queryString}`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/inbox?${parts.join('&')}`, {
       headers: HEADERS,
       cache: 'no-store',
     })
@@ -66,13 +64,11 @@ export async function GET(request: NextRequest) {
     try {
       data = JSON.parse(raw)
     } catch {
-      console.error('[route] JSON parse error, raw:', raw)
       return NextResponse.json({ error: 'Invalid JSON from Supabase' }, { status: 500 })
     }
 
     if (!Array.isArray(data)) {
-      console.error('[route] Expected array, got:', data)
-      return NextResponse.json({ error: 'Unexpected Supabase response', detail: data }, { status: 500 })
+      return NextResponse.json({ error: 'Unexpected response', detail: data }, { status: 500 })
     }
 
     const mapped = data.map((row) => ({
@@ -105,21 +101,19 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Missing id or action' }, { status: 400 })
     }
 
+    // Enum conversation_status : open | in_progress | waiting | resolved | archived | spam
     let update: Record<string, any> = {}
-    if (action === 'read') update = { is_read: true }
-    else if (action === 'archive') update = { status: 'archived' }
+    if (action === 'read')      update = { is_read: true }
+    else if (action === 'archive')   update = { status: 'archived' }
     else if (action === 'unarchive') update = { status: 'open' }
-    else if (action === 'priority') update = { priority: 'high' }
+    else if (action === 'priority')  update = { priority: 'high' }
     else return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/conversations?id=eq.${id}`,
-      {
-        method: 'PATCH',
-        headers: { ...HEADERS, Prefer: 'return=minimal' },
-        body: JSON.stringify(update),
-      }
-    )
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/conversations?id=eq.${id}`, {
+      method: 'PATCH',
+      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify(update),
+    })
 
     if (!res.ok) {
       const err = await res.text()
