@@ -28,6 +28,16 @@ type ThreadMsg = {
 
 type Toast = { id: number; text: string }
 
+const SOURCES = ['Email', 'SMS', 'WhatsApp', 'LinkedIn'] as const
+type Source = typeof SOURCES[number]
+
+const SOURCE_ICONS: Record<Source, string> = {
+  Email: '\u2709',
+  SMS: '\u{1F4F1}',
+  WhatsApp: '\u{1F7E2}',
+  LinkedIn: '\u{1F4BC}',
+}
+
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -77,7 +87,7 @@ const STYLES = `
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
   textarea::placeholder { color: rgba(255,255,255,0.3); }
   input::placeholder { color: rgba(255,255,255,0.3); }
   input { -webkit-tap-highlight-color: transparent; }
@@ -89,11 +99,13 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeTab, setActiveTab] = useState<'inbox' | 'archived'>('inbox')
+  const [activeSource, setActiveSource] = useState<Source | null>(null)
   const [selected, setSelected] = useState<Msg | null>(null)
   const [thread, setThread] = useState<ThreadMsg[]>([])
   const [threadLoading, setThreadLoading] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState('')
   const [toasts, setToasts] = useState<Toast[]>([])
   const [archiving, setArchiving] = useState(false)
 
@@ -104,7 +116,6 @@ export default function Home() {
   const pollRef = useRef<ReturnType<typeof setInterval>>()
   const toastCounter = useRef(0)
 
-  // Debounce recherche
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery), 350)
     return () => clearTimeout(t)
@@ -120,29 +131,25 @@ export default function Home() {
     const params = new URLSearchParams()
     if (activeTab === 'archived') params.set('archived', 'true')
     if (debouncedSearch) params.set('search', debouncedSearch)
+    if (activeSource) params.set('source', activeSource)
 
     try {
       const res = await fetch(`/api/messages?${params}`)
       const data: Msg[] = await res.json()
-
       const filtered = data
         .filter((m) => {
           if (activeTab === 'inbox') return !localArchived.current.has(m.id)
           if (activeTab === 'archived') return !localUnarchived.current.has(m.id)
           return true
         })
-        .map((m) => ({
-          ...m,
-          read: localRead.current.has(m.id) ? true : m.read,
-        }))
-
+        .map((m) => ({ ...m, read: localRead.current.has(m.id) ? true : m.read }))
       setMessages(filtered)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  }, [activeTab, debouncedSearch])
+  }, [activeTab, debouncedSearch, activeSource])
 
   useEffect(() => {
     setLoading(true)
@@ -161,6 +168,7 @@ export default function Home() {
     setSelected(msg)
     setThread([])
     setThreadLoading(true)
+    setSendError('')
 
     if (!msg.read && !localRead.current.has(msg.id)) {
       localRead.current.add(msg.id)
@@ -188,7 +196,6 @@ export default function Home() {
     const isArchiving = activeTab === 'inbox'
     setArchiving(true)
 
-    // Optimistic : retire de la liste courante immédiatement
     if (isArchiving) localArchived.current.add(msg.id)
     else localUnarchived.current.add(msg.id)
     setMessages((prev) => prev.filter((m) => m.id !== msg.id))
@@ -202,123 +209,91 @@ export default function Home() {
       })
 
       if (!isArchiving) {
-        // Désarchivage : on vide le flag local et on bascule vers Inbox
         localUnarchived.current.delete(msg.id)
         showToast('Conversation restaur\u00e9e dans la bo\u00eete de r\u00e9ception')
         setActiveTab('inbox')
         setSearchQuery('')
-        // Le changement d'activeTab déclenche fetchMessages via useEffect
       } else {
         showToast('Conversation archiv\u00e9e')
       }
     } catch (e) {
       console.error(e)
-      showToast('Erreur — r\u00e9essaie')
+      showToast('Erreur \u2014 r\u00e9essaie')
     } finally {
       setArchiving(false)
     }
   }
 
   const sendReply = async () => {
-  if (!selected || !replyText.trim() || sending) return
-  setSending(true)
-  setSendError('')
+    if (!selected || !replyText.trim() || sending) return
+    setSending(true)
+    setSendError('')
 
-  if (selected.source !== 'Email') {
-    setSendError(`R\u00e9ponse via ${selected.source} non disponible pour l\u2019instant`)
-    setSending(false)
-    return
-  }
-
-  try {
-    const res = await fetch('/api/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversation_id: selected.id,
-        canal: 'Email',
-        message: replyText,
-        subject: selected.summary || undefined,
-      }),
-    })
-
-    const data = await res.json()
-
-    if (res.ok && data.success) {
-      setThread((prev) => [
-        ...prev,
-        {
-          id: data.message_id || `local-${Date.now()}`,
-          body: replyText,
-          direction: 'outbound' as const,
-          sent_at: new Date().toISOString(),
-        },
-      ])
-      setReplyText('')
-    } else {
-      setSendError(data.error || 'Envoi \u00e9chou\u00e9')
+    if (selected.source !== 'Email') {
+      setSendError(`R\u00e9ponse via ${selected.source} non disponible pour l\u2019instant`)
+      setSending(false)
+      return
     }
-  } catch (e) {
-    console.error(e)
-    setSendError('Erreur r\u00e9seau')
-  } finally {
-    setSending(false)
-  }
-}
 
-  try {
-    const res = await fetch('/api/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversation_id: selected.id,
-        canal: 'Email',
-        message: replyText,
-        subject: selected.summary || undefined,
-      }),
-    })
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: selected.id,
+          canal: 'Email',
+          message: replyText,
+          subject: selected.summary || undefined,
+        }),
+      })
 
-    const data = await res.json()
+      const data = await res.json()
 
-    if (res.ok && data.success) {
-      setThread((prev) => [
-        ...prev,
-        {
-          id: data.message_id || `local-${Date.now()}`,
-          body: replyText,
-          direction: 'outbound',
-          sent_at: new Date().toISOString(),
-        },
-      ])
-      setReplyText('')
-    } else {
-      console.error('[sendReply]', data)
-      setSendError(data.error || 'Envoi \u00e9chou\u00e9')
+      if (res.ok && data.success) {
+        setThread((prev) => [
+          ...prev,
+          {
+            id: data.message_id || `local-${Date.now()}`,
+            body: replyText,
+            direction: 'outbound' as const,
+            sent_at: new Date().toISOString(),
+          },
+        ])
+        setReplyText('')
+        showToast('Message envoy\u00e9 \u2713')
+      } else {
+        setSendError(data.error || 'Envoi \u00e9chou\u00e9')
+      }
+    } catch (e) {
+      console.error(e)
+      setSendError('Erreur r\u00e9seau')
+    } finally {
+      setSending(false)
     }
-  } catch (e) {
-    console.error(e)
-    setSendError('Erreur r\u00e9seau')
-  } finally {
-    setSending(false)
   }
-}
+
   const switchTab = (tab: 'inbox' | 'archived') => {
     setActiveTab(tab)
     setSearchQuery('')
+    setActiveSource(null)
     setSelected(null)
   }
+
+  const toggleSource = (s: Source) => {
+    setActiveSource((prev) => (prev === s ? null : s))
+  }
+
+  const unreadCount = messages.filter((m) => !m.read && !localRead.current.has(m.id)).length
 
   return (
     <>
       <style>{STYLES}</style>
 
-      {/* Ambient glow */}
       <div style={{ position: 'fixed', top: -200, left: '50%', transform: 'translateX(-50%)', width: 600, height: 400, background: 'radial-gradient(ellipse, rgba(124,58,237,0.15) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
 
-      {/* Toasts */}
-      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 100, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 100, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', pointerEvents: 'none' }}>
         {toasts.map((t) => (
-          <div key={t.id} style={{ background: 'rgba(30,30,30,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '10px 18px', fontSize: 13, color: '#f5f5f5', backdropFilter: 'blur(12px)', animation: 'toastIn 0.2s ease', whiteSpace: 'nowrap' }}>
+          <div key={t.id} style={{ background: 'rgba(25,25,25,0.96)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '10px 18px', fontSize: 13, color: '#f5f5f5', backdropFilter: 'blur(12px)', animation: 'toastIn 0.2s ease', whiteSpace: 'nowrap' }}>
             {t.text}
           </div>
         ))}
@@ -326,15 +301,14 @@ export default function Home() {
 
       <div style={{ position: 'relative', zIndex: 1, maxWidth: 480, margin: '0 auto', minHeight: '100vh' }}>
 
-        {/* Header sticky */}
         <div style={{ position: 'sticky', top: 0, background: 'rgba(8,8,8,0.92)', backdropFilter: 'blur(24px)', zIndex: 10 }}>
           <div style={{ padding: '52px 20px 0' }}>
+
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: -0.5 }}>Matehia</h1>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed', boxShadow: '0 0 10px #7c3aed' }} />
             </div>
 
-            {/* Barre de recherche */}
             <div style={{ position: 'relative', marginBottom: 10 }}>
               <svg style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.35, pointerEvents: 'none' }} width="15" height="15" viewBox="0 0 15 15" fill="none">
                 <circle cx="6.5" cy="6.5" r="4.5" stroke="white" strokeWidth="1.5" />
@@ -354,19 +328,35 @@ export default function Home() {
               )}
             </div>
 
-            {/* Onglets */}
-            <div style={{ display: 'flex', gap: 6, paddingBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               {(['inbox', 'archived'] as const).map((tab) => (
-                <button key={tab} onClick={() => switchTab(tab)} style={{ padding: '6px 16px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, transition: 'all 0.18s', background: activeTab === tab ? '#7c3aed' : 'rgba(255,255,255,0.06)', color: activeTab === tab ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                <button key={tab} onClick={() => switchTab(tab)} style={{ position: 'relative', padding: '6px 16px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, transition: 'all 0.18s', background: activeTab === tab ? '#7c3aed' : 'rgba(255,255,255,0.06)', color: activeTab === tab ? '#fff' : 'rgba(255,255,255,0.45)' }}>
                   {tab === 'inbox' ? 'Bo\u00eete de r\u00e9ception' : 'Archives'}
+                  {tab === 'inbox' && unreadCount > 0 && (
+                    <span style={{ position: 'absolute', top: -4, right: -4, background: '#7c3aed', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 10, minWidth: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px', border: '2px solid #080808' }}>
+                      {unreadCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
+
+            <div style={{ display: 'flex', gap: 6, paddingBottom: 10, overflowX: 'auto' }}>
+              {SOURCES.map((s) => {
+                const active = activeSource === s
+                return (
+                  <button key={s} onClick={() => toggleSource(s)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, border: `1px solid ${active ? 'rgba(124,58,237,0.6)' : 'rgba(255,255,255,0.08)'}`, cursor: 'pointer', fontSize: 12, fontWeight: 500, flexShrink: 0, transition: 'all 0.15s', background: active ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.04)', color: active ? 'rgba(155,92,255,1)' : 'rgba(255,255,255,0.4)' }}>
+                    <span>{SOURCE_ICONS[s]}</span>
+                    <span>{s}</span>
+                  </button>
+                )
+              })}
+            </div>
+
             <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
           </div>
         </div>
 
-        {/* Liste messages */}
         <div style={{ paddingBottom: 80 }}>
           {loading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}>
@@ -374,8 +364,12 @@ export default function Home() {
             </div>
           ) : messages.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '80px 20px', color: 'rgba(255,255,255,0.25)' }}>
-              <div style={{ fontSize: 36, marginBottom: 14 }}>{searchQuery ? '\u{1F50D}' : activeTab === 'archived' ? '\u{1F5C4}' : '\u2709'}</div>
-              <div style={{ fontSize: 15 }}>{searchQuery ? 'Aucune conversation trouv\u00e9e' : activeTab === 'archived' ? 'Aucune conversation archiv\u00e9e' : 'Bo\u00eete vide'}</div>
+              <div style={{ fontSize: 36, marginBottom: 14 }}>
+                {searchQuery ? '\u{1F50D}' : activeSource ? SOURCE_ICONS[activeSource] : activeTab === 'archived' ? '\u{1F5C4}' : '\u2709'}
+              </div>
+              <div style={{ fontSize: 15 }}>
+                {searchQuery ? 'Aucune conversation trouv\u00e9e' : activeSource ? `Aucun message ${activeSource}` : activeTab === 'archived' ? 'Aucune conversation archiv\u00e9e' : 'Bo\u00eete vide'}
+              </div>
             </div>
           ) : (
             messages.map((msg, i) => (
@@ -397,7 +391,8 @@ export default function Home() {
                         <div style={{ width: 6, height: 6, borderRadius: '50%', background: getPriorityColor(msg.priority) }} />
                       </div>
                     </div>
-                    <div style={{ marginBottom: 5 }}>
+                    <div style={{ marginBottom: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ fontSize: 12 }}>{SOURCE_ICONS[msg.source as Source] || ''}</span>
                       <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 6, letterSpacing: 0.3, background: 'rgba(124,58,237,0.12)', color: 'rgba(155,92,255,0.9)', border: '1px solid rgba(124,58,237,0.18)' }}>{msg.source}</span>
                     </div>
                     {msg.summary && (
@@ -412,31 +407,25 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Bottom sheet */}
       {selected && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
           onClick={(e) => { if (e.target === e.currentTarget) setSelected(null) }}>
           <div style={{ background: '#0f0f0f', borderRadius: '20px 20px 0 0', border: '1px solid rgba(255,255,255,0.07)', borderBottom: 'none', display: 'flex', flexDirection: 'column', maxHeight: '88vh', animation: 'slideUp 0.28s cubic-bezier(0.32,0.72,0,1)' }}>
 
-            {/* Header sheet */}
             <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 0, flex: 1, paddingRight: 12 }}>
                   <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 5 }}>{selected.sender}</div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13 }}>{SOURCE_ICONS[selected.source as Source] || ''}</span>
                     <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: 'rgba(124,58,237,0.12)', color: 'rgba(155,92,255,0.9)', border: '1px solid rgba(124,58,237,0.18)' }}>{selected.source}</span>
                     <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.28)' }}>{new Date(selected.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  <button
-                    onClick={() => handleArchiveToggle(selected)}
-                    disabled={archiving}
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', color: archiving ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.55)', cursor: archiving ? 'default' : 'pointer', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}
-                  >
-                    {archiving ? (
-                      <div style={{ width: 10, height: 10, border: '1.5px solid rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.5)', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }} />
-                    ) : null}
+                  <button onClick={() => handleArchiveToggle(selected)} disabled={archiving}
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', color: archiving ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.55)', cursor: archiving ? 'default' : 'pointer', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {archiving && <div style={{ width: 10, height: 10, border: '1.5px solid rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.5)', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }} />}
                     {activeTab === 'archived' ? 'D\u00e9sarchiver' : 'Archiver'}
                   </button>
                   <button onClick={() => setSelected(null)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: 18 }}>
@@ -453,7 +442,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Thread */}
             <div ref={threadRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
               {threadLoading ? (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -480,17 +468,23 @@ export default function Home() {
               )}
             </div>
 
-            {/* Réponse — inbox seulement */}
             {activeTab === 'inbox' && (
               <div style={{ padding: '10px 16px 32px', borderTop: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
+                {sendError && (
+                  <div style={{ fontSize: 12, color: '#ef4444', marginBottom: 8, padding: '6px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)' }}>
+                    {sendError}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
                   <textarea value={replyText} onChange={(e) => setReplyText(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-                    placeholder={`R\u00e9pondre via ${selected.source}...`} rows={1}
-                    style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 14, padding: '11px 14px', color: '#f5f5f5', fontSize: 14, outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: 1.45, maxHeight: 100, overflowY: 'auto' }}
+                    placeholder={selected.source === 'Email' ? `R\u00e9pondre via Email...` : `${selected.source} \u2014 non disponible pour l\u2019instant`}
+                    disabled={selected.source !== 'Email'}
+                    rows={1}
+                    style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 14, padding: '11px 14px', color: selected.source === 'Email' ? '#f5f5f5' : 'rgba(255,255,255,0.3)', fontSize: 14, outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: 1.45, maxHeight: 100, overflowY: 'auto', cursor: selected.source !== 'Email' ? 'not-allowed' : 'text' }}
                   />
-                  <button onClick={sendReply} disabled={!replyText.trim() || sending}
-                    style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, background: replyText.trim() && !sending ? '#7c3aed' : 'rgba(124,58,237,0.25)', border: 'none', cursor: replyText.trim() && !sending ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}>
+                  <button onClick={sendReply} disabled={!replyText.trim() || sending || selected.source !== 'Email'}
+                    style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, background: replyText.trim() && !sending && selected.source === 'Email' ? '#7c3aed' : 'rgba(124,58,237,0.25)', border: 'none', cursor: replyText.trim() && !sending && selected.source === 'Email' ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}>
                     {sending ? (
                       <div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }} />
                     ) : (
