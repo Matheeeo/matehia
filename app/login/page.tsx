@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, Lock } from 'lucide-react'
 
 export default function Login() {
   const { session } = useAuth()
@@ -13,30 +13,19 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isSignUp, setIsSignUp] = useState(false)
 
   useEffect(() => {
     if (session) router.replace('/conversations')
   }, [session, router])
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
-    try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password })
-        if (error) throw error
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-      }
-    } catch (err: any) {
-      setError(err.message || 'Une erreur est survenue')
-    } finally {
-      setLoading(false)
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) setError(error.message)
+    setLoading(false)
   }
 
   return (
@@ -53,7 +42,7 @@ export default function Login() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-neutral-900 py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-neutral-800">
-          <form className="space-y-6" onSubmit={handleAuth}>
+          <form className="space-y-5" onSubmit={handleLogin}>
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-300">
                 Adresse e-mail
@@ -61,6 +50,7 @@ export default function Login() {
               <input
                 id="email"
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -75,6 +65,7 @@ export default function Login() {
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -93,25 +84,13 @@ export default function Login() {
               disabled={loading}
               className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 transition-colors"
             >
-              {loading ? 'Chargement...' : isSignUp ? "S'inscrire" : 'Se connecter'}
+              {loading ? 'Connexion...' : 'Se connecter'}
             </button>
           </form>
 
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-neutral-700" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-neutral-900 text-gray-400">Ou</span>
-              </div>
-            </div>
-            <button
-              onClick={() => setIsSignUp(!isSignUp)}
-              className="mt-6 w-full flex justify-center py-2 px-4 border border-neutral-700 rounded-md text-sm font-medium text-gray-300 hover:bg-neutral-800 transition-colors"
-            >
-              {isSignUp ? 'Déjà un compte ? Se connecter' : 'Créer un compte'}
-            </button>
+          <div className="mt-5 flex items-center gap-2 justify-center text-xs text-gray-600">
+            <Lock size={12} />
+            <span>Accès restreint — application privée</span>
           </div>
         </div>
       </div>
