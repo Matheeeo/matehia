@@ -26,6 +26,8 @@ type ThreadMsg = {
   sent_at: string
 }
 
+type Toast = { id: number; text: string }
+
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -75,6 +77,7 @@ const STYLES = `
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
   textarea::placeholder { color: rgba(255,255,255,0.3); }
   input::placeholder { color: rgba(255,255,255,0.3); }
   input { -webkit-tap-highlight-color: transparent; }
@@ -91,32 +94,48 @@ export default function Home() {
   const [threadLoading, setThreadLoading] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const [archiving, setArchiving] = useState(false)
 
   const localRead = useRef<Set<string>>(new Set())
   const localArchived = useRef<Set<string>>(new Set())
   const localUnarchived = useRef<Set<string>>(new Set())
   const threadRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>>()
+  const toastCounter = useRef(0)
 
+  // Debounce recherche
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery), 350)
     return () => clearTimeout(t)
   }, [searchQuery])
 
+  const showToast = (text: string) => {
+    const id = ++toastCounter.current
+    setToasts((prev) => [...prev, { id, text }])
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000)
+  }
+
   const fetchMessages = useCallback(async () => {
     const params = new URLSearchParams()
     if (activeTab === 'archived') params.set('archived', 'true')
     if (debouncedSearch) params.set('search', debouncedSearch)
+
     try {
       const res = await fetch(`/api/messages?${params}`)
       const data: Msg[] = await res.json()
+
       const filtered = data
         .filter((m) => {
           if (activeTab === 'inbox') return !localArchived.current.has(m.id)
           if (activeTab === 'archived') return !localUnarchived.current.has(m.id)
           return true
         })
-        .map((m) => ({ ...m, read: localRead.current.has(m.id) ? true : m.read }))
+        .map((m) => ({
+          ...m,
+          read: localRead.current.has(m.id) ? true : m.read,
+        }))
+
       setMessages(filtered)
     } catch (e) {
       console.error(e)
@@ -142,6 +161,7 @@ export default function Home() {
     setSelected(msg)
     setThread([])
     setThreadLoading(true)
+
     if (!msg.read && !localRead.current.has(msg.id)) {
       localRead.current.add(msg.id)
       fetch('/api/messages', {
@@ -150,6 +170,7 @@ export default function Home() {
         body: JSON.stringify({ id: msg.id, action: 'read' }),
       })
     }
+
     try {
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/messages?conversation_id=eq.${msg.id}&order=sent_at.asc`,
@@ -163,17 +184,39 @@ export default function Home() {
     }
   }
 
-  const handleArchiveToggle = (msg: Msg) => {
+  const handleArchiveToggle = async (msg: Msg) => {
     const isArchiving = activeTab === 'inbox'
+    setArchiving(true)
+
+    // Optimistic : retire de la liste courante immédiatement
     if (isArchiving) localArchived.current.add(msg.id)
     else localUnarchived.current.add(msg.id)
     setMessages((prev) => prev.filter((m) => m.id !== msg.id))
     setSelected(null)
-    fetch('/api/messages', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: msg.id, action: isArchiving ? 'archive' : 'unarchive' }),
-    })
+
+    try {
+      await fetch('/api/messages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: msg.id, action: isArchiving ? 'archive' : 'unarchive' }),
+      })
+
+      if (!isArchiving) {
+        // Désarchivage : on vide le flag local et on bascule vers Inbox
+        localUnarchived.current.delete(msg.id)
+        showToast('Conversation restaur\u00e9e dans la bo\u00eete de r\u00e9ception')
+        setActiveTab('inbox')
+        setSearchQuery('')
+        // Le changement d'activeTab déclenche fetchMessages via useEffect
+      } else {
+        showToast('Conversation archiv\u00e9e')
+      }
+    } catch (e) {
+      console.error(e)
+      showToast('Erreur — r\u00e9essaie')
+    } finally {
+      setArchiving(false)
+    }
   }
 
   const sendReply = async () => {
@@ -213,7 +256,19 @@ export default function Home() {
   return (
     <>
       <style>{STYLES}</style>
+
+      {/* Ambient glow */}
       <div style={{ position: 'fixed', top: -200, left: '50%', transform: 'translateX(-50%)', width: 600, height: 400, background: 'radial-gradient(ellipse, rgba(124,58,237,0.15) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
+
+      {/* Toasts */}
+      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 100, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+        {toasts.map((t) => (
+          <div key={t.id} style={{ background: 'rgba(30,30,30,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '10px 18px', fontSize: 13, color: '#f5f5f5', backdropFilter: 'blur(12px)', animation: 'toastIn 0.2s ease', whiteSpace: 'nowrap' }}>
+            {t.text}
+          </div>
+        ))}
+      </div>
+
       <div style={{ position: 'relative', zIndex: 1, maxWidth: 480, margin: '0 auto', minHeight: '100vh' }}>
 
         {/* Header sticky */}
@@ -224,7 +279,7 @@ export default function Home() {
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed', boxShadow: '0 0 10px #7c3aed' }} />
             </div>
 
-            {/* Search */}
+            {/* Barre de recherche */}
             <div style={{ position: 'relative', marginBottom: 10 }}>
               <svg style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.35, pointerEvents: 'none' }} width="15" height="15" viewBox="0 0 15 15" fill="none">
                 <circle cx="6.5" cy="6.5" r="4.5" stroke="white" strokeWidth="1.5" />
@@ -244,7 +299,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* Tabs */}
+            {/* Onglets */}
             <div style={{ display: 'flex', gap: 6, paddingBottom: 12 }}>
               {(['inbox', 'archived'] as const).map((tab) => (
                 <button key={tab} onClick={() => switchTab(tab)} style={{ padding: '6px 16px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, transition: 'all 0.18s', background: activeTab === tab ? '#7c3aed' : 'rgba(255,255,255,0.06)', color: activeTab === tab ? '#fff' : 'rgba(255,255,255,0.45)' }}>
@@ -256,7 +311,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Liste */}
+        {/* Liste messages */}
         <div style={{ paddingBottom: 80 }}>
           {loading ? (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}>
@@ -308,7 +363,7 @@ export default function Home() {
           onClick={(e) => { if (e.target === e.currentTarget) setSelected(null) }}>
           <div style={{ background: '#0f0f0f', borderRadius: '20px 20px 0 0', border: '1px solid rgba(255,255,255,0.07)', borderBottom: 'none', display: 'flex', flexDirection: 'column', maxHeight: '88vh', animation: 'slideUp 0.28s cubic-bezier(0.32,0.72,0,1)' }}>
 
-            {/* Sheet header */}
+            {/* Header sheet */}
             <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 0, flex: 1, paddingRight: 12 }}>
@@ -319,7 +374,14 @@ export default function Home() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  <button onClick={() => handleArchiveToggle(selected)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', color: 'rgba(255,255,255,0.55)', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}>
+                  <button
+                    onClick={() => handleArchiveToggle(selected)}
+                    disabled={archiving}
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', color: archiving ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.55)', cursor: archiving ? 'default' : 'pointer', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    {archiving ? (
+                      <div style={{ width: 10, height: 10, border: '1.5px solid rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.5)', borderRadius: '50%', animation: 'spin 0.75s linear infinite' }} />
+                    ) : null}
                     {activeTab === 'archived' ? 'D\u00e9sarchiver' : 'Archiver'}
                   </button>
                   <button onClick={() => setSelected(null)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: 18 }}>
@@ -327,6 +389,7 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+
               {selected.summary && (
                 <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 10, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.14)' }}>
                   <div style={{ fontSize: 10, color: 'rgba(155,92,255,0.7)', marginBottom: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' }}>R\u00e9sum\u00e9 IA</div>
@@ -362,7 +425,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* Reply - inbox seulement */}
+            {/* Réponse — inbox seulement */}
             {activeTab === 'inbox' && (
               <div style={{ padding: '10px 16px 32px', borderTop: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
