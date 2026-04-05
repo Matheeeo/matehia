@@ -220,33 +220,53 @@ export default function Home() {
   }
 
   const sendReply = async () => {
-    if (!selected || !replyText.trim() || sending) return
-    setSending(true)
-    try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({
-          conversation_id: selected.id,
-          canal: selected.source.toLowerCase() === 'email' ? 'outlook' : selected.source.toLowerCase(),
-          message: replyText,
-          recipient_id: selected.recipientId,
-        }),
-      })
-      if (res.ok) {
-        setThread((prev) => [
-          ...prev,
-          { id: `local-${Date.now()}`, body: replyText, direction: 'outbound', sent_at: new Date().toISOString() },
-        ])
-        setReplyText('')
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setSending(false)
-    }
+  if (!selected || !replyText.trim() || sending) return
+  setSending(true)
+  setSendError('')
+
+  // Seul Email fonctionne pour l'instant (pas de Twilio)
+  if (selected.source !== 'Email') {
+    setSendError(`R\u00e9ponse via ${selected.source} non disponible pour l\u2019instant (Twilio non configur\u00e9)`)
+    setSending(false)
+    return
   }
 
+  try {
+    const res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: selected.id,
+        canal: 'Email',
+        message: replyText,
+        subject: selected.summary || undefined,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (res.ok && data.success) {
+      setThread((prev) => [
+        ...prev,
+        {
+          id: data.message_id || `local-${Date.now()}`,
+          body: replyText,
+          direction: 'outbound',
+          sent_at: new Date().toISOString(),
+        },
+      ])
+      setReplyText('')
+    } else {
+      console.error('[sendReply]', data)
+      setSendError(data.error || 'Envoi \u00e9chou\u00e9')
+    }
+  } catch (e) {
+    console.error(e)
+    setSendError('Erreur r\u00e9seau')
+  } finally {
+    setSending(false)
+  }
+}
   const switchTab = (tab: 'inbox' | 'archived') => {
     setActiveTab(tab)
     setSearchQuery('')
