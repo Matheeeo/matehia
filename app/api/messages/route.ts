@@ -9,7 +9,6 @@ const sbHeaders = {
   'Content-Type': 'application/json',
 };
 
-// canal Supabase (enum lowercase) → source frontend (affichée dans l'app)
 const CANAL_TO_SOURCE: Record<string, string> = {
   outlook:  'Email',
   sms:      'SMS',
@@ -18,7 +17,6 @@ const CANAL_TO_SOURCE: Record<string, string> = {
   internal: 'Autre',
 };
 
-// source frontend → canal Supabase (pour le filtre GET)
 const SOURCE_TO_CANAL: Record<string, string> = {
   Email:    'outlook',
   SMS:      'sms',
@@ -51,12 +49,12 @@ export async function GET(request: NextRequest) {
     const rows = await res.json();
 
     const messages = rows.map((c: Record<string, unknown>) => ({
-      id:              c.id,                                                      // UUID conversation — pour fetchThread
-      source:          CANAL_TO_SOURCE[c.canal as string] ?? 'Autre',            // source frontend correcte
+      id:              c.id,
+      source:          CANAL_TO_SOURCE[c.canal as string] ?? 'Autre',
       date:            c.date_dernier_message,
       sender:          c.expediteur_principal,
-      content:         c.dernier_message || c.resume || '',                       // message ENTIER (bottom sheet)
-      summary:         c.resume || null,                                           // résumé IA (card uniquement)
+      content:         c.dernier_message || c.resume || '',
+      summary:         c.resume || null,
       priority:        (c.priorite as string)?.includes('Haute') ? 'haute' : null,
       read:            c.lu,
       id_destinataire: c.id_destinataire || '',
