@@ -4,7 +4,7 @@ import { Zap } from 'lucide-react'
 
 export default function ActionsPage() {
   return (
-    <div className="flex-1 overflow-y-auto p-8 max-w-2xl">
+    <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-2xl w-full mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Zap size={22} className="text-gray-400" />
         <h1 className="text-2xl font-bold text-white">Actions</h1>

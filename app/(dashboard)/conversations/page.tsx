@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   MessageSquare, Link2, Phone, Send, User,
-  Search, X, Archive, ArchiveRestore, Mail,
+  Search, X, Archive, ArchiveRestore, Mail, ArrowLeft,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -282,8 +282,12 @@ export default function ConversationsPage() {
         ))}
       </div>
 
-      {/* Conversation list */}
-      <div className="w-80 shrink-0 border-r border-neutral-800 flex flex-col bg-neutral-950">
+      {/* Conversation list — full width on mobile when no conv selected, w-80 on desktop */}
+      <div className={clsx(
+        'shrink-0 border-r border-neutral-800 flex flex-col bg-neutral-950',
+        'w-full md:w-80',
+        selected ? 'hidden md:flex' : 'flex'
+      )}>
         {/* Header */}
         <div className="px-4 pt-4 pb-2 border-b border-neutral-800 space-y-2">
           <div className="flex items-center gap-2">
@@ -403,12 +407,22 @@ export default function ConversationsPage() {
         </div>
       </div>
 
-      {/* Chat panel */}
-      <div className="flex-1 flex flex-col bg-black overflow-hidden">
+      {/* Chat panel — hidden on mobile when no conv selected */}
+      <div className={clsx(
+        'flex-1 flex flex-col bg-black overflow-hidden',
+        selected ? 'flex' : 'hidden md:flex'
+      )}>
         {selected ? (
           <>
             {/* Chat header */}
-            <div className="h-16 border-b border-neutral-800 flex items-center px-6 shrink-0 bg-neutral-950/50">
+            <div className="h-16 border-b border-neutral-800 flex items-center px-4 md:px-6 shrink-0 bg-neutral-950/50">
+              {/* Back button — mobile only */}
+              <button
+                onClick={() => setSelected(null)}
+                className="md:hidden mr-2 text-gray-400 hover:text-white p-1 -ml-1 shrink-0"
+              >
+                <ArrowLeft size={20} />
+              </button>
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <div className="w-9 h-9 rounded-full bg-neutral-800 flex items-center justify-center text-gray-300 font-semibold text-sm shrink-0">
                   {(selected.contacts?.full_name || selected.contacts?.email || '?').charAt(0).toUpperCase()}
@@ -429,14 +443,14 @@ export default function ConversationsPage() {
                 <button
                   onClick={() => handleArchiveToggle(selected)}
                   disabled={archiving}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-700 text-xs text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-lg border border-neutral-700 text-xs text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors disabled:opacity-40"
                 >
                   {tab === 'archived' ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-                  {tab === 'archived' ? 'Restaurer' : 'Archiver'}
+                  <span className="hidden sm:inline">{tab === 'archived' ? 'Restaurer' : 'Archiver'}</span>
                 </button>
                 <button
                   onClick={() => setSelected(null)}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg border border-neutral-700 text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors text-lg"
+                  className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg border border-neutral-700 text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors text-lg"
                 >
                   ×
                 </button>

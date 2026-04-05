@@ -8,7 +8,7 @@ export default function ProfilePage() {
   const initials = (user?.email ?? '?').charAt(0).toUpperCase()
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 max-w-2xl">
+    <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-2xl w-full mx-auto">
       <h1 className="text-2xl font-bold text-white mb-6">Profil</h1>
 
       <div className="bg-neutral-900 rounded-2xl border border-neutral-800 overflow-hidden">
