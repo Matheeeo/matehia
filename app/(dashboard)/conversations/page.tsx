@@ -222,21 +222,33 @@ export default function ConversationsPage() {
 
   const sendReply = async () => {
     if (!selected || !replyText.trim() || sending) return
-    if (selected.channel_connections?.channel !== 'outlook') {
-      setSendError(`Réponse via ${CHANNEL_LABELS[selected.channel_connections?.channel ?? 'internal']} non disponible pour l'instant`)
+
+    // Normalise FK embed — Supabase may return array or object
+    const cc = Array.isArray(selected.channel_connections)
+      ? selected.channel_connections[0] ?? null
+      : selected.channel_connections
+
+    if (cc?.channel !== 'outlook') {
+      setSendError(`Réponse via ${CHANNEL_LABELS[cc?.channel ?? 'internal']} non disponible pour l'instant`)
       return
     }
 
     setSending(true)
     setSendError('')
 
+    // Forward JWT so Supabase RLS passes in the API route
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+
     try {
       const res = await fetch('/api/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           conversation_id: selected.id,
-          canal: 'Email',
           message: replyText,
           subject: selected.subject || selected.ai_summary || undefined,
         }),
@@ -269,7 +281,12 @@ export default function ConversationsPage() {
   }
 
   const unreadCount = conversations.filter(c => !c.is_read).length
-  const channel = selected?.channel_connections?.channel
+  // Normalise FK embed (Supabase may return array or object)
+  const channel = selected
+    ? (Array.isArray(selected.channel_connections)
+        ? selected.channel_connections[0]?.channel
+        : selected.channel_connections?.channel) ?? null
+    : null
 
   return (
     <div className="flex flex-1 h-full overflow-hidden">
