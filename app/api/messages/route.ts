@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch conversation + contact_id separately (avoids FK array normalisation issues)
     const convRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/conversations?id=eq.${conversation_id}&select=id,ai_summary,subject,contact_id`,
+      `${SUPABASE_URL}/rest/v1/conversations?id=eq.${conversation_id}&select=id,ai_summary,subject,contact_id,channel_connection_id`,
       { headers: HEADERS, cache: 'no-store' }
     )
 
@@ -72,6 +72,34 @@ export async function POST(request: NextRequest) {
 
     let n8nData: any
     try { n8nData = JSON.parse(n8nRaw) } catch { n8nData = {} }
+
+    // Persist outbound message in Supabase so it survives page refresh
+    const now = new Date().toISOString()
+    await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        conversation_id,
+        channel_connection_id: conv.channel_connection_id,
+        direction: 'outbound',
+        body: message,
+        subject: subject || conv.subject || null,
+        sent_at: now,
+        status: 'sent',
+        source_system: 'outlook',
+        ...(n8nData?.message_id ? { external_message_id: String(n8nData.message_id) } : {}),
+      }),
+    })
+
+    // Update last_message_at on the conversation
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/conversations?id=eq.${conversation_id}`,
+      {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ last_message_at: now }),
+      }
+    )
 
     return NextResponse.json({ success: true, message_id: n8nData?.message_id, to: contactEmail })
   } catch (err) {
