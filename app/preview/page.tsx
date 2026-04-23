@@ -42,8 +42,7 @@ export default function PreviewPage() {
 
       <div style={{ width: '100%', maxWidth: 1280, borderRadius: 12, overflow: 'hidden', boxShadow: '0 0 80px rgba(99,102,241,0.15)' }}>
         <Player
-          // @ts-expect-error — dynamic import type mismatch at build time
-          component={MatehiaPresentation}
+          component={MatehiaPresentation as React.ComponentType<Record<string, never>>}
           durationInFrames={600}
           fps={30}
           compositionWidth={1920}

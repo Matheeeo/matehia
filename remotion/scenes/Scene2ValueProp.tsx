@@ -6,29 +6,28 @@ import { ArcBackground } from '../components/ArcBackground';
 
 const FONT = "'Inter', 'Helvetica Neue', -apple-system, sans-serif";
 
-// Hero headline broken into words for staggered reveal
 const LINE1_WORDS = ['Pilotez', 'votre', 'entreprise', 'depuis'];
 const LINE2_WORDS = ['un', 'seul', 'point', 'de', 'commande'];
 
 interface WordRevealProps {
   word: string;
   startFrame: number;
-  style?: React.CSSProperties;
+  color?: string;
 }
-
-const WordReveal: React.FC<WordRevealProps> = ({ word, startFrame, style }) => {
+const WordReveal: React.FC<WordRevealProps> = ({ word, startFrame, color = C.white }) => {
   const frame = useCurrentFrame();
-  const progress = interpolate(frame, [startFrame, startFrame + 22], [0, 1], {
+  const progress = interpolate(frame, [startFrame, startFrame + 32], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
     easing: easeOutExpo,
   });
   return (
-    <span style={{ display: 'inline-block', overflow: 'hidden', verticalAlign: 'bottom', ...style }}>
+    <span style={{ display: 'inline-block', overflow: 'hidden', verticalAlign: 'bottom' }}>
       <span style={{
         display: 'inline-block',
-        transform: `translateY(${(1 - progress) * 105}%)`,
-        opacity: progress,
+        transform: `translateY(${(1 - progress) * 110}%)`,
+        opacity: Math.min(1, progress * 1.4),
+        color,
       }}>
         {word}
       </span>
@@ -37,66 +36,70 @@ const WordReveal: React.FC<WordRevealProps> = ({ word, startFrame, style }) => {
 };
 
 const TILES = [
-  { label: 'Priorités', icon: '⊙', accent: C.purple },
-  { label: 'Messages', icon: '□', accent: C.purple },
-  { label: 'Agenda', icon: '▦', accent: C.blue },
-  { label: 'Clients', icon: '◉', accent: C.green },
-  { label: 'Outils IA', icon: '⚡', accent: C.orange, badge: 'BÊTA' },
-  { label: 'Réglages', icon: '⚙', accent: C.muted },
+  { label: 'Priorités', icon: '⊙' },
+  { label: 'Messages', icon: '□' },
+  { label: 'Agenda', icon: '▦' },
+  { label: 'Clients', icon: '◉' },
+  { label: 'Outils IA', icon: '⚡', badge: 'BÊTA' },
+  { label: 'Réglages', icon: '⚙' },
 ] as const;
 
-// 170 frames = 5.7s
+// 240 frames = 8s
 export const Scene2ValueProp: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const sceneOpacity = interpolate(frame, [0, 16, 154, 170], [0, 1, 1, 0], {
+  const sceneOpacity = interpolate(frame, [0, 20, 220, 240], [0, 1, 1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
 
-  // "LUXEE COMMAND CENTER" badge: frames 8-28
-  const badgeOpacity = interpolate(frame, [8, 28], [0, 1], {
+  // Badge: frames 12–40
+  const badgeOpacity = interpolate(frame, [12, 40], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const badgeY = interpolate(frame, [8, 28], [10, 0], {
+  const badgeY = interpolate(frame, [12, 40], [12, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
     easing: easeOutExpo,
   });
 
-  // Line 1 words start at frame 20, stagger 8 each
-  // Line 2 words start at frame 52 (after line 1 + small pause), stagger 8 each
-
-  // Subtitle: frames 105–132
-  const subtitleOpacity = interpolate(frame, [105, 132], [0, 1], {
+  // Line 1: start 30, stagger 13
+  // Line 2: start 85, stagger 13
+  // Subtitle: 170–205
+  const subtitleOpacity = interpolate(frame, [170, 205], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const subtitleY = interpolate(frame, [105, 132], [14, 0], {
+  const subtitleY = interpolate(frame, [170, 205], [18, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
     easing: easeOutCubic,
   });
 
-  // Command bar: frames 115–140
-  const cmdBarScale = spring({
-    frame: frame - 115,
+  // Command bar: frame 190
+  const cmdSpring = spring({
+    frame: frame - 190,
     fps,
-    config: { damping: 20, stiffness: 200, mass: 0.7 },
-    durationInFrames: 30,
+    config: { damping: 22, stiffness: 180, mass: 0.8 },
+    durationInFrames: 35,
   });
-  const cmdBarOpacity = interpolate(frame, [115, 138], [0, 1], {
+  const cmdOpacity = interpolate(frame, [190, 215], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
 
-  // Tiles cascade: frames 128 + i*7
+  // Divider under title: frames 150–175
+  const dividerScale = interpolate(frame, [150, 178], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+    easing: easeOutCubic,
+  });
+
   return (
     <AbsoluteFill style={{ background: C.bg, opacity: sceneOpacity }}>
-
-      <ArcBackground drawStart={0} drawDuration={60} globalOpacity={0.9} />
+      <ArcBackground drawStart={0} drawDuration={80} globalOpacity={0.85} />
 
       <div style={{
         display: 'flex',
@@ -111,114 +114,108 @@ export const Scene2ValueProp: React.FC = () => {
         <div style={{
           opacity: badgeOpacity,
           transform: `translateY(${badgeY}px)`,
-          marginBottom: 36,
+          marginBottom: 44,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          padding: '7px 18px',
+          padding: '8px 20px',
           borderRadius: 100,
-          border: `1px solid ${C.borderLight}`,
+          border: `1px solid rgba(99,102,241,0.3)`,
           background: 'rgba(99,102,241,0.08)',
         }}>
-          <span style={{ fontSize: 12 }}>⚡</span>
-          <span style={{
-            fontSize: 11,
-            fontWeight: 600,
-            fontFamily: FONT,
-            color: C.purple,
-            letterSpacing: 3.5,
-            textTransform: 'uppercase',
-          }}>
-            Luxee Command Center
+          <span style={{ fontSize: 12, fontWeight: 600, fontFamily: FONT, color: C.purple, letterSpacing: 3.5, textTransform: 'uppercase' }}>
+            ⚡ Luxee Command Center
           </span>
         </div>
 
-        {/* Headline line 1 — word-by-word reveal */}
+        {/* Line 1 */}
         <div style={{
           display: 'flex',
           flexWrap: 'wrap',
           justifyContent: 'center',
-          gap: '0 18px',
-          fontSize: 82,
+          gap: '0 20px',
+          fontSize: 88,
           fontWeight: 800,
           fontFamily: FONT,
-          color: C.white,
-          letterSpacing: -2.5,
-          lineHeight: 1.08,
-          marginBottom: 4,
+          letterSpacing: -3,
+          lineHeight: 1.06,
+          marginBottom: 6,
         }}>
           {LINE1_WORDS.map((word, i) => (
-            <WordReveal key={word} word={word} startFrame={20 + i * 9} />
+            <WordReveal key={word} word={word} startFrame={30 + i * 13} color={C.white} />
           ))}
         </div>
 
-        {/* Headline line 2 */}
+        {/* Line 2 — indigo */}
         <div style={{
           display: 'flex',
           flexWrap: 'wrap',
           justifyContent: 'center',
-          gap: '0 18px',
-          fontSize: 82,
+          gap: '0 20px',
+          fontSize: 88,
           fontWeight: 800,
           fontFamily: FONT,
-          color: C.purple,
-          letterSpacing: -2.5,
-          lineHeight: 1.08,
-          marginBottom: 32,
+          letterSpacing: -3,
+          lineHeight: 1.06,
+          marginBottom: 0,
         }}>
           {LINE2_WORDS.map((word, i) => (
-            <WordReveal key={word} word={word} startFrame={56 + i * 9} />
+            <WordReveal key={word} word={word} startFrame={85 + i * 13} color={C.purple} />
           ))}
         </div>
+
+        {/* Gold-style divider */}
+        <div style={{
+          width: 260,
+          height: 1,
+          background: `linear-gradient(90deg, transparent, rgba(99,102,241,0.6), transparent)`,
+          marginTop: 40,
+          marginBottom: 36,
+          transform: `scaleX(${dividerScale})`,
+          transformOrigin: 'center',
+        }} />
 
         {/* Subtitle */}
         <div style={{
-          fontSize: 18,
+          fontSize: 20,
           fontWeight: 300,
           fontFamily: FONT,
           color: C.muted,
           textAlign: 'center',
-          maxWidth: 680,
-          lineHeight: 1.6,
+          maxWidth: 720,
+          lineHeight: 1.65,
           letterSpacing: 0.1,
           opacity: subtitleOpacity,
           transform: `translateY(${subtitleY}px)`,
-          marginBottom: 40,
+          marginBottom: 48,
         }}>
           Actions, messageries, agenda et clients dans un cockpit fluide,
           rapide et prêt à exécuter.
         </div>
 
-        {/* AI Command bar */}
+        {/* Command bar */}
         <div style={{
-          width: 660,
-          padding: '16px 22px',
-          borderRadius: 14,
+          width: 700,
+          padding: '18px 24px',
+          borderRadius: 16,
           border: `1px solid ${C.borderLight}`,
           background: 'rgba(255,255,255,0.04)',
-          backdropFilter: 'blur(20px)',
           display: 'flex',
           alignItems: 'center',
           gap: 14,
-          marginBottom: 48,
-          opacity: cmdBarOpacity,
-          transform: `scaleY(${cmdBarScale})`,
+          marginBottom: 52,
+          opacity: cmdOpacity,
+          transform: `scaleY(${cmdSpring})`,
           transformOrigin: 'center',
         }}>
-          <span style={{ fontSize: 20, opacity: 0.7 }}>⚡</span>
-          <span style={{
-            fontSize: 16,
-            fontWeight: 300,
-            fontFamily: FONT,
-            color: 'rgba(255,255,255,0.35)',
-            flex: 1,
-          }}>
+          <span style={{ fontSize: 20, opacity: 0.6 }}>⚡</span>
+          <span style={{ fontSize: 16, fontWeight: 300, fontFamily: FONT, color: 'rgba(255,255,255,0.3)', flex: 1 }}>
             Décrivez un besoin, l&apos;IA vous guide puis exécute
           </span>
           <div style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
+            width: 34,
+            height: 34,
+            borderRadius: 9,
             background: C.purple,
             display: 'flex',
             alignItems: 'center',
@@ -233,43 +230,32 @@ export const Scene2ValueProp: React.FC = () => {
         {/* Module tiles 3×2 */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 200px)',
-          gridTemplateRows: 'repeat(2, 60px)',
-          gap: 10,
+          gridTemplateColumns: 'repeat(3, 210px)',
+          gridTemplateRows: 'repeat(2, 64px)',
+          gap: 12,
         }}>
           {TILES.map((tile, i) => {
-            const tileOpacity = interpolate(frame, [135 + i * 7, 155 + i * 7], [0, 1], {
-              extrapolateLeft: 'clamp',
-              extrapolateRight: 'clamp',
+            const start = 205 + i * 10;
+            const tileOpacity = interpolate(frame, [start, start + 26], [0, 1], {
+              extrapolateLeft: 'clamp', extrapolateRight: 'clamp',
             });
-            const tileY = interpolate(frame, [135 + i * 7, 155 + i * 7], [16, 0], {
-              extrapolateLeft: 'clamp',
-              extrapolateRight: 'clamp',
-              easing: easeOutExpo,
+            const tileY = interpolate(frame, [start, start + 26], [18, 0], {
+              extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: easeOutExpo,
             });
             return (
-              <div
-                key={tile.label}
-                style={{
-                  opacity: tileOpacity,
-                  transform: `translateY(${tileY}px)`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '0 18px',
-                  borderRadius: 10,
-                  border: `1px solid ${C.border}`,
-                  background: C.bgCard,
-                }}
-              >
-                <span style={{ fontSize: 15, opacity: 0.8 }}>{tile.icon}</span>
-                <span style={{
-                  fontSize: 15,
-                  fontWeight: 500,
-                  fontFamily: FONT,
-                  color: C.white,
-                  letterSpacing: -0.2,
-                }}>
+              <div key={tile.label} style={{
+                opacity: tileOpacity,
+                transform: `translateY(${tileY}px)`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '0 20px',
+                borderRadius: 12,
+                border: `1px solid ${C.border}`,
+                background: C.bgCard,
+              }}>
+                <span style={{ fontSize: 16, opacity: 0.7 }}>{tile.icon}</span>
+                <span style={{ fontSize: 15, fontWeight: 500, fontFamily: FONT, color: C.white, letterSpacing: -0.2 }}>
                   {tile.label}
                 </span>
                 {'badge' in tile && tile.badge && (
@@ -279,9 +265,9 @@ export const Scene2ValueProp: React.FC = () => {
                     fontFamily: FONT,
                     color: C.purple,
                     letterSpacing: 1,
-                    padding: '2px 6px',
+                    padding: '2px 7px',
                     borderRadius: 4,
-                    background: C.purpleDim,
+                    background: 'rgba(99,102,241,0.12)',
                     marginLeft: 'auto',
                   }}>
                     {tile.badge}
