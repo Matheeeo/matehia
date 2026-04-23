@@ -6,13 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "video:studio": "remotion studio remotion/index.ts",
+    "video:render": "remotion render remotion/index.ts MatehiaPresentation out/matehia-presentation.mp4",
+    "video:still": "remotion still remotion/index.ts MatehiaPresentation out/still.png"
   },
   "dependencies": {
     "@notionhq/client": "^2.3.0",
+    "@remotion/cli": "^4.0.451",
+    "@remotion/player": "^4.0.451",
     "next": "16.2.2",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "remotion": "^4.0.451"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
